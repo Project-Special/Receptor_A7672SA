@@ -1775,6 +1775,11 @@ const identity = { manu:'', model:'', fw:'', imei:'', imsi:'', iccid:'', num:'' 
 const waiters = [];
 
 function waitFor(test, ms = 8000) {
+  // Sem transporte ativo não há resposta possível: resolve na hora em vez de
+  // deixar o painel pendurado até o timeout. Sem isto, um "Enviar SMS" com o
+  // módulo desconectado travava 51 s (6 s do prompt '>' + 45 s do OK).
+  if (!connected) return Promise.resolve(null);
+
   return new Promise(resolve => {
     const w = { test, resolve };
     w.timer = setTimeout(() => {
@@ -1978,6 +1983,7 @@ async function disconnect() {
   } catch (_) {}
   connected = false;
   connectedTransport = null;
+  simState = 'unknown';
   setStatus('disconnected');
   document.getElementById('connInfo').textContent = '';
   log('sys', 'Desconectado.', 'info');
@@ -2055,6 +2061,35 @@ async function writeRaw(text) {
 // Nada é transmitido enquanto não houver um transporte ativo. Avisa no
 // terminal, mas sem inundá-lo quando uma macro dispara vários comandos.
 let lastNoConnWarn = 0;
+
+// ── Estado do SIM ─────────────────────────────────────────────
+// 'unknown' até o módulo se manifestar. Só bloqueamos quando há certeza de que
+// o SIM está ausente ou travado — nunca no desconhecido, senão a primeira
+// consulta ficaria impossível.
+let simState = 'unknown';
+
+function trackSimState(line) {
+  const before = simState;
+  if (/SIM not inserted|NOT INSERTED|\+CME ERROR:\s*10\b/i.test(line)) simState = 'absent';
+  else if (/\+CPIN:\s*READY/i.test(line)) simState = 'ready';
+  else if (/\+CPIN:\s*SIM (PIN|PUK)/i.test(line)) simState = 'locked';
+  else return;
+
+  if (simState !== before) {
+    const txt = { ready: 'SIM pronto.', absent: 'Nenhum SIM detectado.', locked: 'SIM bloqueado por PIN/PUK.' }[simState];
+    log('sys', txt, simState === 'ready' ? 'ok' : 'err');
+    if (simState !== 'ready') setText('n-sim', simState === 'absent' ? 'Ausente' : 'Bloqueado');
+  }
+}
+
+// Guarda para o que depende de credencial: registro, APN, SMS, voz e dados.
+// Consultas de diagnóstico (CSQ, CPSI, CEREG) continuam livres — são
+// justamente o que se quer olhar quando o SIM é o problema.
+function requireSim(what) {
+  if (simState === 'ready' || simState === 'unknown') return true;
+  log('sys', `${what} cancelado — ${simState === 'absent' ? 'nenhum SIM detectado' : 'SIM bloqueado por PIN'}.`, 'err');
+  return false;
+}
 
 function requireConnection(what) {
   if (connected) return true;
@@ -2252,7 +2287,10 @@ function onConnModeChange() {
 function stopAllTimers() {
   [gnssPollTimer, autoNetTimer, autoHwTimer].forEach(t => { if (t) clearInterval(t); });
   gnssPollTimer = autoNetTimer = autoHwTimer = null;
-  const gb = document.getElementById('gnssPollBtn'); if (gb) gb.textContent = 'ON';
+  // Os rótulos precisam voltar ao estado inicial, senão o botão continua
+  // anunciando "Auto ON" com o timer já morto.
+  [['gnssPollBtn', 'ON'], ['autoNetBtn', '⚡ Auto 10s'], ['autoHwBtn', '⚡ Auto 15s']]
+    .forEach(([id, label]) => { const b = document.getElementById(id); if (b) b.textContent = label; });
 }
 
 function enterSimulationMode() {
@@ -2816,6 +2854,10 @@ let headCapture = false;
 const URC_PREFIXES = /^(\$G|\$B|\+CGNSSINFO|\+CGNSSPWR|\+CMQTT|\+CMTI|\+CMT:|\+CLIP|\+CREG|\+CGREG|\+CEREG|\+CSQ|\+CPSI|\+CIPRXGET|\+IPD|RECV FROM|RING|NO CARRIER|MISSED_CALL)/;
 
 function parseResponse(line) {
+  // Antes de qualquer roteamento: o "SIM not inserted" chega como +CME ERROR e
+  // seria engolido pela captura de payload HTTP mais abaixo.
+  trackSimState(line);
+
   // NMEA bruto — sempre tem prioridade, chega intercalado com qualquer outra coisa
   if (line.startsWith('$G') || line.startsWith('$B')) { parseNmea(line); return; }
 
@@ -3486,6 +3528,7 @@ async function runInitSequence() {
 }
 
 function scanOperators() {
+  if (!requireSim('busca de operadoras')) return;
   log('sys', 'Buscando operadoras — pode levar até 60 s...', 'info');
   send('AT+COPS=?');
 }
@@ -3497,6 +3540,7 @@ async function refreshNetwork() {
 }
 
 async function applyApnFromPanel() {
+  if (!requireSim('configuração de APN')) return;
   const apn = (document.getElementById('apnInput').value || '').trim();
   if (!apn) { alert('Informe o APN da operadora.'); return; }
   const user = (document.getElementById('apnUser').value || '').trim();
@@ -3507,7 +3551,8 @@ async function applyApnFromPanel() {
   log('sys', `APN configurado: ${apn}`, 'ok');
 }
 
-function applyCnmp() { send(`AT+CNMP=${document.getElementById('cnmpSel').value}`); }
+function applyCnmp() {
+  if (!requireSim('mudança de modo de rede')) return; send(`AT+CNMP=${document.getElementById('cnmpSel').value}`); }
 
 function toggleAutoNetwork() {
   const btn = document.getElementById('autoNetBtn');
@@ -3625,6 +3670,7 @@ function updateSmsCounter() {
 }
 
 async function smsInit() {
+  if (!requireSim('configuração de SMS')) return;
   await sendWait('AT+CMGF=1');
   await sendWait('AT+CSCS="GSM"');
   await sendWait('AT+CPMS="SM","SM","SM"');
@@ -3637,6 +3683,7 @@ async function sendSMS() {
   let msg = document.getElementById('smsMsg').value;
   const ucs2 = document.getElementById('smsCharset').value === 'UCS2';
   if (!num || !msg) { alert('Preencha número e mensagem.'); return; }
+  if (!requireConnection('SMS') || !requireSim('SMS')) return;
 
   await sendWait('AT+CMGF=1');
   await sendWait(`AT+CSCS="${ucs2 ? 'UCS2' : 'GSM'}"`);
@@ -3670,6 +3717,7 @@ function promptCall() {
 }
 
 function dialFromPanel() {
+  if (!requireSim('chamada')) return;
   const n = document.getElementById('callNumber').value.trim();
   if (!n) { alert('Informe o número.'); return; }
   send(`ATD${n};`);
@@ -3775,6 +3823,7 @@ async function httpRequest() {
   const body = document.getElementById('httpBody').value;
   const ssl = document.getElementById('httpSslChk').checked || /^https:/i.test(url);
 
+  if (!requireSim('Requisição HTTP')) { setText('http-state', 'Sem SIM'); return; }
   setText('http-state', 'Verificando rede');
   setHttpResponse('');
   if (!await httpNetworkReady()) { setText('http-state', 'Sem rede de dados'); return; }
@@ -3823,6 +3872,7 @@ function mqttConnect() {
 }
 
 async function mqttFullConnect() {
+  if (!requireSim('conexão MQTT')) return;
   const ssl = /^ssl:|^mqtts:/i.test(document.getElementById('mqttHost').value.trim());
   await sendWait('AT+CMQTTSTART', 15000);
   await delay(300);
@@ -3898,6 +3948,7 @@ async function mqttDisconnect() {
 
 // ── TCP/IP ────────────────────────────────────────────────────
 async function tcpOpenFlow() {
+  if (!requireSim('abertura de socket TCP')) return;
   const link = document.getElementById('tcpLink').value;
   const proto = document.getElementById('tcpProto').value;
   const host = document.getElementById('tcpHost').value.trim();
