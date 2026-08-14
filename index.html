@@ -1,0 +1,4093 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>A7672SA Controller</title>
+  <meta name="theme-color" content="#3b82f6" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="A7672SA" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface2: #21262d;
+      --border: #30363d;
+      --accent: #2563eb;
+      --accent-hover: #3b82f6;
+      --danger: #da3633;
+      --warn: #d29922;
+      --info: #1f6feb;
+      --text: #c9d1d9;
+      --text-dim: #8b949e;
+      --green: #3fb950;
+      --yellow: #e3b341;
+      --red: #f85149;
+      --cyan: #39d3e0;
+      --mono: 'Cascadia Mono', 'Courier New', monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* HEADER */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    header h1 { font-size: 16px; font-weight: 600; letter-spacing: 0.5px; }
+    header .subtitle { font-size: 11px; color: var(--text-dim); border: 1px solid var(--border); padding: 2px 8px; border-radius: 20px; }
+
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-left: auto;
+    }
+
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); transition: background 0.3s; }
+    .dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .dot.connecting { background: var(--yellow); animation: pulse 1s infinite; }
+
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+    /* LAYOUT */
+    .layout { flex: 1; min-height: 0; display: flex; flex-direction: row; overflow: hidden; }
+
+    /* SIDEBAR */
+    .sidebar {
+      width: 268px;
+      flex-shrink: 0;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+    }
+
+    .sidebar-section { border-bottom: 1px solid var(--border); padding: 10px 12px; }
+
+    .sidebar-section h2 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .sidebar-section h2 .chev { transition: transform 0.15s; font-size: 10px; }
+    .sidebar-section.collapsed h2 .chev { transform: rotate(-90deg); }
+    .sidebar-section.collapsed .sec-body { display: none; }
+
+    .cmd-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 7px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      margin-bottom: 4px;
+      transition: all 0.15s;
+      text-align: left;
+    }
+
+    .cmd-btn:hover { background: #2d333b; border-color: #58a6ff44; }
+    .cmd-btn:active { transform: scale(0.98); }
+
+    .cmd-btn .icon { font-size: 14px; width: 16px; text-align: center; }
+    .cmd-btn .label { flex: 1; }
+    .cmd-btn .at-cmd { font-family: var(--mono); font-size: 10px; color: var(--text-dim); }
+
+    .cmd-btn.danger { border-color: #da363344; }
+    .cmd-btn.danger:hover { background: #3d1f1f; border-color: var(--danger); }
+    .cmd-btn.success { border-color: #23863644; }
+    .cmd-btn.success:hover { background: #1a2f1a; border-color: var(--green); }
+    .cmd-btn.warn { border-color: #d2992244; }
+    .cmd-btn.warn:hover { background: #2d2011; border-color: var(--warn); }
+    .cmd-btn.info { border-color: #1f6feb44; }
+    .cmd-btn.info:hover { background: #111d2c; border-color: var(--info); }
+
+    /* Desconectado: comandos ficam inertes até haver transporte ativo.
+       Declarado depois das variantes para vencer os :hover coloridos. */
+    .cmd-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .cmd-btn:disabled:hover { background: var(--surface2); border-color: var(--border); }
+    .cmd-btn:disabled:active { transform: none; }
+
+    /* MAIN AREA */
+    .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; min-width: 0; }
+
+    /* TABS */
+    .tabs {
+      display: flex;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 8px 16px 6px;
+      gap: 8px;
+      flex-shrink: 0;
+      overflow-x: auto;
+    }
+
+    .tab {
+      padding: 8px 14px;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface2);
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+
+    .tab:hover { color: var(--text); border-color: #58a6ff55; background: #2a313a; }
+    .tab.active { color: var(--text); border-color: #58a6ff; background: #1a2533; box-shadow: inset 0 -2px 0 #58a6ff; }
+
+    /* PANELS */
+    .panels { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+
+    .panel { display: none; flex-direction: column; overflow: hidden; flex: 1; min-height: 0; min-width: 0; }
+    .panel.active { display: flex; }
+
+    /* generic scrollable pane */
+    .pane {
+      flex: 1;
+      height: 100%;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      overflow-y: auto;
+    }
+
+    .pane h3 { font-size: 14px; color: var(--text-dim); font-weight: 600; }
+
+    .section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+    #panel-map { position: relative; width: 100%; height: 100%; padding: 0; }
+    /* a barra em si não captura cliques (deixa arrastar o mapa); os botões sim */
+    #map-controls .action-btn { pointer-events: auto; align-self: auto; width: auto; }
+    #map-wrapper { position: absolute; inset: 0; overflow: hidden; }
+    #leaflet-map { width: 100%; height: 100%; background: #0a0e14; }
+
+    /* TERMINAL */
+    .terminal-wrap {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 16px;
+      background: #0a0e14;
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .log-entry { display: flex; gap: 10px; margin-bottom: 2px; animation: fadeIn 0.2s ease; }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; } }
+
+    .log-time { color: #444c56; flex-shrink: 0; user-select: none; }
+    .log-dir { flex-shrink: 0; font-weight: bold; }
+    .log-dir.tx { color: #58a6ff; }
+    .log-dir.rx { color: var(--green); }
+    .log-dir.sys { color: var(--yellow); }
+    .log-dir.err { color: var(--red); }
+    .log-msg { word-break: break-all; white-space: pre-wrap; }
+    .log-msg.ok { color: var(--green); }
+    .log-msg.err { color: var(--red); }
+    .log-msg.info { color: var(--yellow); }
+    .log-msg.urc { color: var(--cyan); }
+
+    /* INPUT BAR */
+    .input-bar {
+      display: flex;
+      gap: 8px;
+      padding: 10px 16px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .input-bar input {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-family: var(--mono);
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .input-bar input:focus { border-color: #58a6ff66; }
+    .input-bar input::placeholder { color: var(--text-dim); }
+
+    .send-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      transition: background 0.15s;
+    }
+
+    .send-btn:hover { background: var(--accent-hover); }
+    .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .send-btn:disabled:hover { background: var(--accent); }
+    .input-bar input:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    .clear-btn {
+      background: var(--surface2);
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.15s;
+    }
+
+    .clear-btn:hover { color: var(--text); border-color: #58a6ff44; }
+
+    /* GNSS banner */
+    .fix-banner {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+    }
+
+    .fix-indicator {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--red);
+      flex-shrink: 0;
+      transition: background 0.4s;
+    }
+
+    .fix-indicator.fix { background: var(--green); box-shadow: 0 0 8px var(--green); animation: none; }
+    .fix-indicator.nofix { animation: pulse 1.2s infinite; }
+
+    .fix-banner-text { flex: 1; }
+    .fix-banner-title { font-size: 15px; font-weight: 600; }
+    .fix-banner-sub   { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+
+    .raw-box {
+      background: #0a0e14;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-dim);
+      word-break: break-all;
+      line-height: 1.7;
+    }
+
+    .raw-box .raw-label { color: #58a6ff; font-weight: bold; }
+
+    .field-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .field-table tr { border-bottom: 1px solid #21262d; }
+    .field-table tr:last-child { border-bottom: none; }
+    .field-table td { padding: 5px 8px; }
+    .field-table .f-idx  { color: var(--text-dim); width: 28px; text-align: right; font-family: var(--mono); }
+    .field-table .f-name { color: #58a6ff; width: 190px; }
+    .field-table .f-raw  { font-family: var(--mono); color: var(--text-dim); width: 140px; }
+    .field-table .f-dec  { color: var(--text); font-weight: 500; }
+    .field-table tr.f-highlight .f-dec { color: var(--green); }
+    .field-table tr.f-warn .f-dec { color: var(--yellow); }
+    .field-table tr.f-err .f-dec  { color: var(--red); }
+
+    .view-toggle {
+      padding: 5px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text-dim);
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.15s;
+    }
+    .view-toggle:hover { color: var(--text); border-color: #58a6ff44; }
+    .view-toggle.active { background: #1f6feb33; border-color: #1f6feb; color: #58a6ff; }
+
+    .info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+
+    .info-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+
+    .info-card .card-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+    }
+
+    .info-card .card-value { font-family: var(--mono); font-size: 20px; font-weight: 600; color: var(--text); word-break: break-all; }
+    .info-card .card-value.big { font-size: 24px; }
+    .info-card .card-unit { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+    .info-card.highlight { border-color: #58a6ff44; background: #111d2c; }
+    .info-card.highlight .card-value { color: #58a6ff; }
+    .info-card.good  .card-value { color: var(--green); }
+    .info-card.mid   .card-value { color: var(--yellow); }
+    .info-card.bad   .card-value { color: var(--red); }
+
+    /* Meter (RSRP/RSRQ/SINR) */
+    .meter { height: 8px; border-radius: 4px; background: #0a0e14; border: 1px solid var(--border); overflow: hidden; margin-top: 8px; }
+    .meter > div { height: 100%; width: 0%; background: var(--green); transition: width 0.4s, background 0.4s; }
+
+    .map-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: #58a6ff;
+      text-decoration: none;
+      font-size: 13px;
+      padding: 6px 14px;
+      border: 1px solid #1f6feb44;
+      border-radius: 6px;
+      transition: all 0.15s;
+    }
+    .map-link:hover { background: #111d2c; }
+
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+
+    .form-group label { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      resize: vertical;
+      transition: border-color 0.15s;
+    }
+
+    .form-group input:focus,
+    .form-group textarea:focus,
+    .form-group select:focus { border-color: #58a6ff66; }
+
+    .form-row { display: flex; gap: 10px; }
+    .form-row .form-group { flex: 1; }
+
+    .action-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 9px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      transition: background 0.15s;
+      align-self: flex-start;
+    }
+
+    .action-btn:hover { background: var(--accent-hover); }
+    .action-btn.secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    .action-btn.secondary:hover { border-color: #58a6ff44; }
+    .action-btn.danger { background: var(--danger); }
+    .action-btn.danger:hover { background: #f0524f; }
+
+    .console-box {
+      flex: 1;
+      min-height: 150px;
+      background: #0a0e14;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow: auto;
+    }
+
+    .signal-bars { display: flex; align-items: flex-end; gap: 4px; height: 40px; }
+    .bar { width: 14px; border-radius: 3px 3px 0 0; background: var(--border); transition: background 0.3s, height 0.3s; }
+    .bar.active { background: var(--green); }
+
+    .pill {
+      display: inline-block;
+      font-size: 11px;
+      padding: 2px 9px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      background: var(--surface2);
+    }
+    .pill.on  { color: var(--green); border-color: #3fb95055; background: #16281a; }
+    .pill.off { color: var(--text-dim); }
+    .pill.err { color: var(--red); border-color: #f8514955; background: #2b1517; }
+
+    .hint { font-size: 11px; color: var(--text-dim); line-height: 1.6; }
+    .hint code { font-family: var(--mono); color: var(--cyan); }
+
+    /* SCROLLBAR */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #484f58; }
+
+    /* CONNECTION BAR */
+    .conn-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+
+    .conn-bar select,
+    .conn-bar input[type=text],
+    .conn-bar input[type=number] {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      outline: none;
+    }
+
+    .conn-btn { padding: 5px 14px; border-radius: 6px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.15s; }
+    .conn-btn.connect { background: var(--accent); color: #fff; }
+    .conn-btn.connect:hover { background: var(--accent-hover); }
+    .conn-btn.disconnect { background: var(--danger); color: #fff; }
+    .conn-label { font-size: 12px; color: var(--text-dim); }
+
+    [title] { cursor: help; }
+
+    .menu-toggle {
+      display: none;
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+
+    .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 99; }
+
+    /* ── MOBILE ────────────────────────────────── */
+    @media (max-width: 768px) {
+      body { font-size: 15px; }
+      .menu-toggle { display: block; }
+      header h1 { font-size: 14px; }
+      header .subtitle { display: none; }
+
+      .sidebar {
+        position: fixed;
+        top: 0; left: 0; bottom: 0;
+        width: 285px;
+        z-index: 100;
+        transform: translateX(-100%);
+        transition: transform 0.25s ease;
+        box-shadow: 4px 0 24px rgba(0,0,0,0.6);
+      }
+      .sidebar.open { transform: translateX(0); }
+      .sidebar-overlay.open { display: block; }
+
+      .conn-bar { flex-direction: column; align-items: flex-start; gap: 8px; padding: 10px 12px; }
+      .conn-bar > * { width: 100%; }
+      .conn-bar select,
+      .conn-bar input[type=text],
+      .conn-bar input[type=number] { width: 100% !important; font-size: 15px; padding: 8px 12px; }
+      .conn-btn { width: 100%; padding: 10px 14px; font-size: 14px; }
+      #connInfo { margin-left: 0 !important; }
+
+      .tabs { padding: 6px 10px; gap: 6px; }
+      .tab { padding: 10px 16px; font-size: 14px; }
+
+      .cmd-btn { padding: 11px 12px; font-size: 14px; }
+      .cmd-btn .at-cmd { display: none; }
+
+      .info-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+      .info-card .card-value { font-size: 18px; }
+      .info-card .card-value.big { font-size: 22px; }
+
+      .field-table .f-idx, .field-table .f-raw { display: none; }
+      .field-table .f-name { width: auto; }
+
+      .action-btn { width: 100%; text-align: center; padding: 11px 20px; }
+      .form-row { flex-direction: column; }
+
+      .input-bar { padding: 8px 10px; gap: 6px; }
+      .input-bar input { font-size: 15px; padding: 10px 12px; }
+      .send-btn { padding: 10px 16px; font-size: 14px; }
+      .clear-btn { padding: 10px 12px; font-size: 14px; }
+
+      .pane { padding: 12px; gap: 10px; }
+      .grid-2, .grid-3 { grid-template-columns: 1fr !important; }
+    }
+
+    @media (max-width: 380px) {
+      .info-grid { grid-template-columns: 1fr 1fr; }
+      .tabs { gap: 4px; }
+      .tab { padding: 9px 12px; font-size: 13px; }
+    }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <button class="menu-toggle" onclick="toggleSidebar()" aria-label="Menu">☰</button>
+  <span style="font-size:20px;">📶</span>
+  <h1>A7672SA Controller</h1>
+  <span class="subtitle">SIMCom A76XX · LTE Cat.1 · GNSS</span>
+  <div class="status-badge">
+    <div class="dot" id="statusDot"></div>
+    <span id="statusText">Desconectado</span>
+  </div>
+</header>
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+<!-- CONNECTION BAR -->
+<div class="conn-bar">
+  <span class="conn-label">Interface:</span>
+  <select id="connMode" onchange="onConnModeChange()">
+    <option value="serial" selected>Serial (USB/UART)</option>
+    <option value="websocket">WebSocket Bridge (Python)</option>
+    <option value="simulator">Simulador (sem hardware)</option>
+  </select>
+  <span class="conn-label" id="portLabel">Porta:</span>
+  <select id="portSelect">
+    <option value="">-- selecionar --</option>
+  </select>
+  <span class="conn-label" id="baudLabel">Baud:</span>
+  <select id="baudSelect">
+    <option selected>115200</option><option>230400</option><option>460800</option>
+    <option>921600</option><option>57600</option><option>38400</option><option>9600</option>
+  </select>
+  <span class="conn-label" id="wsUrlLabel" style="display:none;">URL:</span>
+  <input id="wsUrlInput" type="text" value="ws://127.0.0.1:8765" style="display:none;width:190px;" />
+  <button class="conn-btn connect" id="connectBtn" onclick="toggleConnect()">Conectar</button>
+  <button class="conn-btn" id="detectBtn" style="background:var(--surface2);border:1px solid var(--border);color:var(--text-dim);" onclick="requestPorts()">🔍 Detectar Portas</button>
+  <label class="conn-label" style="display:flex;align-items:center;gap:5px;cursor:pointer;" title="Executa a sequência de inicialização assim que conectar">
+    <input type="checkbox" id="autoInitChk" checked style="accent-color:var(--accent);" /> Auto-init
+  </label>
+  <span class="conn-label" id="connInfo" style="margin-left:auto;"></span>
+</div>
+
+<div class="layout">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+
+    <div class="sidebar-section" id="sec-basico">
+      <h2 onclick="toggleSection('sec-basico')">Básico / Identificação <span class="chev">▼</span></h2>
+      <div class="sec-body">
+        <button class="cmd-btn" onclick="send('AT')">
+          <span class="icon">🔔</span><span class="label">Ping</span><span class="at-cmd">AT</span>
+        </button>
+        <button class="cmd-btn info" onclick="runInitSequence()">
+          <span class="icon">🚀</span><span class="label">Init completo</span><span class="at-cmd">macro</span>
+        </button>
+        <button class="cmd-btn" onclick="send('ATI')">
+          <span class="icon">ℹ️</span><span class="label">Info do módulo</span><span class="at-cmd">ATI</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+SIMCOMATI')">
+          <span class="icon">📋</span><span class="label">Info detalhada</span><span class="at-cmd">AT+SIMCOMATI</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CGMR')">
+          <span class="icon">🧬</span><span class="label">Firmware</span><span class="at-cmd">AT+CGMR</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CGSN')">
+          <span class="icon">🔢</span><span class="label">IMEI</span><span class="at-cmd">AT+CGSN</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CIMI')">
+          <span class="icon">💳</span><span class="label">IMSI do SIM</span><span class="at-cmd">AT+CIMI</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CICCID')">
+          <span class="icon">🪪</span><span class="label">ICCID do SIM</span><span class="at-cmd">AT+CICCID</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CNUM')">
+          <span class="icon">☎️</span><span class="label">Número do SIM</span><span class="at-cmd">AT+CNUM</span>
+        </button>
+        <button class="cmd-btn info" onclick="send('AT+CPIN?')">
+          <span class="icon">🔐</span><span class="label">Status do SIM</span><span class="at-cmd">AT+CPIN?</span>
+        </button>
+        <button class="cmd-btn" onclick="send('ATE0')">
+          <span class="icon">🙈</span><span class="label">Eco OFF</span><span class="at-cmd">ATE0</span>
+        </button>
+        <button class="cmd-btn" onclick="send('ATE1')">
+          <span class="icon">👁️</span><span class="label">Eco ON</span><span class="at-cmd">ATE1</span>
+        </button>
+        <button class="cmd-btn warn" onclick="send('AT&amp;W')">
+          <span class="icon">💾</span><span class="label">Salvar perfil</span><span class="at-cmd">AT&amp;W</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="sidebar-section" id="sec-rede">
+      <h2 onclick="toggleSection('sec-rede')">Rede LTE / GSM <span class="chev">▼</span></h2>
+      <div class="sec-body">
+        <button class="cmd-btn info" onclick="send('AT+CPSI?');showTab('rede')">
+          <span class="icon">🛰️</span><span class="label">Info do sistema</span><span class="at-cmd">AT+CPSI?</span>
+        </button>
+        <button class="cmd-btn info" onclick="send('AT+CSQ');showTab('rede')">
+          <span class="icon">📊</span><span class="label">Qualidade do sinal</span><span class="at-cmd">AT+CSQ</span>
+        </button>
+        <button class="cmd-btn info" onclick="send('AT+CESQ');showTab('rede')">
+          <span class="icon">📈</span><span class="label">RSRP / RSRQ</span><span class="at-cmd">AT+CESQ</span>
+        </button>
+        <button class="cmd-btn info" onclick="send('AT+CEREG?')">
+          <span class="icon">📶</span><span class="label">Registro EPS (LTE)</span><span class="at-cmd">AT+CEREG?</span>
+        </button>
+        <button class="cmd-btn info" onclick="send('AT+CREG?')">
+          <span class="icon">📡</span><span class="label">Registro CS</span><span class="at-cmd">AT+CREG?</span>
+        </button>
+        <button class="cmd-btn info" onclick="send('AT+CGREG?')">
+          <span class="icon">🌐</span><span class="label">Registro GPRS</span><span class="at-cmd">AT+CGREG?</span>
+        </button>
+        <button class="cmd-btn info" onclick="send('AT+COPS?')">
+          <span class="icon">🏢</span><span class="label">Operadora atual</span><span class="at-cmd">AT+COPS?</span>
+        </button>
+        <button class="cmd-btn warn" onclick="scanOperators()">
+          <span class="icon">🔎</span><span class="label">Buscar operadoras (~60s)</span><span class="at-cmd">AT+COPS=?</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CNSMOD?')">
+          <span class="icon">🔀</span><span class="label">Modo de rede atual</span><span class="at-cmd">AT+CNSMOD?</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CNMP?')">
+          <span class="icon">⚙️</span><span class="label">Preferência de rede</span><span class="at-cmd">AT+CNMP?</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CGATT?')">
+          <span class="icon">🔗</span><span class="label">PS Attach</span><span class="at-cmd">AT+CGATT?</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CGDCONT?')">
+          <span class="icon">📇</span><span class="label">Contextos PDP</span><span class="at-cmd">AT+CGDCONT?</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CGPADDR')">
+          <span class="icon">🏷️</span><span class="label">IP do contexto</span><span class="at-cmd">AT+CGPADDR</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="sidebar-section" id="sec-gnss">
+      <h2 onclick="toggleSection('sec-gnss')">GNSS <span class="chev">▼</span></h2>
+      <div class="sec-body">
+        <button class="cmd-btn success" onclick="gnssOn();showTab('gnss')">
+          <span class="icon">▶️</span><span class="label">Ligar GNSS</span><span class="at-cmd">AT+CGNSSPWR=1</span>
+        </button>
+        <button class="cmd-btn danger" onclick="gnssOff();showTab('gnss')">
+          <span class="icon">⏹️</span><span class="label">Desligar GNSS</span><span class="at-cmd">AT+CGNSSPWR=0</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CGNSSINFO');showTab('gnss')">
+          <span class="icon">📍</span><span class="label">Posição atual</span><span class="at-cmd">AT+CGNSSINFO</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CGNSSPWR?')">
+          <span class="icon">🔌</span><span class="label">Status alimentação</span><span class="at-cmd">AT+CGNSSPWR?</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CGNSSMODE?')">
+          <span class="icon">🌍</span><span class="label">Constelações</span><span class="at-cmd">AT+CGNSSMODE?</span>
+        </button>
+        <button class="cmd-btn" onclick="nmeaStart()">
+          <span class="icon">📡</span><span class="label">Stream NMEA ON</span><span class="at-cmd">AT+CGNSSTST=1</span>
+        </button>
+        <button class="cmd-btn" onclick="nmeaStop()">
+          <span class="icon">🚫</span><span class="label">Stream NMEA OFF</span><span class="at-cmd">AT+CGNSSTST=0</span>
+        </button>
+        <button class="cmd-btn warn" onclick="send('AT+CGPSHOT')">
+          <span class="icon">🔥</span><span class="label">Hot start</span><span class="at-cmd">AT+CGPSHOT</span>
+        </button>
+        <button class="cmd-btn warn" onclick="send('AT+CGPSCOLD')">
+          <span class="icon">🧊</span><span class="label">Cold start</span><span class="at-cmd">AT+CGPSCOLD</span>
+        </button>
+        <button class="cmd-btn info" onclick="send('AT+CAGPS')">
+          <span class="icon">⚡</span><span class="label">AGPS (precisa de dados)</span><span class="at-cmd">AT+CAGPS</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="sidebar-section collapsed" id="sec-sms">
+      <h2 onclick="toggleSection('sec-sms')">SMS <span class="chev">▼</span></h2>
+      <div class="sec-body">
+        <button class="cmd-btn" onclick="send('AT+CMGF=1')">
+          <span class="icon">📝</span><span class="label">Modo texto</span><span class="at-cmd">AT+CMGF=1</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CSCS=&quot;GSM&quot;')">
+          <span class="icon">🔤</span><span class="label">Charset GSM</span><span class="at-cmd">AT+CSCS="GSM"</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CNMI=2,1,0,0,0')">
+          <span class="icon">🔔</span><span class="label">URC de SMS ON</span><span class="at-cmd">AT+CNMI=2,1</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CNMI=0,0,0,0,0')">
+          <span class="icon">🔕</span><span class="label">URC de SMS OFF</span><span class="at-cmd">AT+CNMI=0,0</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CMGL=&quot;ALL&quot;');showTab('sms')">
+          <span class="icon">📥</span><span class="label">Listar SMSs</span><span class="at-cmd">AT+CMGL</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CPMS?')">
+          <span class="icon">🗄️</span><span class="label">Memória de SMS</span><span class="at-cmd">AT+CPMS?</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CSCA?')">
+          <span class="icon">📮</span><span class="label">Centro de mensagens</span><span class="at-cmd">AT+CSCA?</span>
+        </button>
+        <button class="cmd-btn danger" onclick="confirmDeleteAllSms()">
+          <span class="icon">🗑️</span><span class="label">Apagar todos SMSs</span><span class="at-cmd">AT+CMGD=,4</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="sidebar-section collapsed" id="sec-voz">
+      <h2 onclick="toggleSection('sec-voz')">Voz / Áudio <span class="chev">▼</span></h2>
+      <div class="sec-body">
+        <button class="cmd-btn warn" onclick="promptCall()">
+          <span class="icon">📞</span><span class="label">Fazer chamada</span><span class="at-cmd">ATD</span>
+        </button>
+        <button class="cmd-btn success" onclick="send('ATA')">
+          <span class="icon">✅</span><span class="label">Atender</span><span class="at-cmd">ATA</span>
+        </button>
+        <button class="cmd-btn danger" onclick="send('AT+CHUP')">
+          <span class="icon">📵</span><span class="label">Desligar chamada</span><span class="at-cmd">AT+CHUP</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CLCC')">
+          <span class="icon">📋</span><span class="label">Listar chamadas</span><span class="at-cmd">AT+CLCC</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CLIP=1')">
+          <span class="icon">🆔</span><span class="label">Identificar chamador</span><span class="at-cmd">AT+CLIP=1</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CPAS')">
+          <span class="icon">🩺</span><span class="label">Estado do módulo</span><span class="at-cmd">AT+CPAS</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CLVL?')">
+          <span class="icon">🔊</span><span class="label">Volume atual</span><span class="at-cmd">AT+CLVL?</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CSDVC?')">
+          <span class="icon">🎧</span><span class="label">Canal de áudio</span><span class="at-cmd">AT+CSDVC?</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="sidebar-section collapsed" id="sec-dados">
+      <h2 onclick="toggleSection('sec-dados')">Dados / TCP-IP <span class="chev">▼</span></h2>
+      <div class="sec-body">
+        <button class="cmd-btn info" onclick="applyApnFromPanel()">
+          <span class="icon">📶</span><span class="label">Configurar APN</span><span class="at-cmd">AT+CGDCONT</span>
+        </button>
+        <button class="cmd-btn success" onclick="send('AT+NETOPEN')">
+          <span class="icon">🔓</span><span class="label">Abrir rede</span><span class="at-cmd">AT+NETOPEN</span>
+        </button>
+        <button class="cmd-btn danger" onclick="send('AT+NETCLOSE')">
+          <span class="icon">🔒</span><span class="label">Fechar rede</span><span class="at-cmd">AT+NETCLOSE</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+IPADDR')">
+          <span class="icon">🏷️</span><span class="label">IP local</span><span class="at-cmd">AT+IPADDR</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CIPOPEN?')">
+          <span class="icon">🔗</span><span class="label">Sockets abertos</span><span class="at-cmd">AT+CIPOPEN?</span>
+        </button>
+        <button class="cmd-btn" onclick="pingHost()">
+          <span class="icon">🏓</span><span class="label">Ping</span><span class="at-cmd">AT+CPING</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CDNSGIP=&quot;google.com&quot;')">
+          <span class="icon">🧭</span><span class="label">Resolver DNS</span><span class="at-cmd">AT+CDNSGIP</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="sidebar-section collapsed" id="sec-http">
+      <h2 onclick="toggleSection('sec-http')">HTTP(S) <span class="chev">▼</span></h2>
+      <div class="sec-body">
+        <button class="cmd-btn info" onclick="httpInit()">
+          <span class="icon">🌍</span><span class="label">Inicializar HTTP</span><span class="at-cmd">AT+HTTPINIT</span>
+        </button>
+        <button class="cmd-btn info" onclick="promptHttpURL()">
+          <span class="icon">🔗</span><span class="label">Definir URL</span><span class="at-cmd">AT+HTTPPARA="URL"</span>
+        </button>
+        <button class="cmd-btn info" onclick="httpAction(0)">
+          <span class="icon">⬇️</span><span class="label">HTTP GET</span><span class="at-cmd">AT+HTTPACTION=0</span>
+        </button>
+        <button class="cmd-btn info" onclick="httpAction(1)">
+          <span class="icon">⬆️</span><span class="label">HTTP POST</span><span class="at-cmd">AT+HTTPACTION=1</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+HTTPHEAD')">
+          <span class="icon">🧾</span><span class="label">Cabeçalhos</span><span class="at-cmd">AT+HTTPHEAD</span>
+        </button>
+        <button class="cmd-btn" onclick="httpReadAll()">
+          <span class="icon">📄</span><span class="label">Ler resposta</span><span class="at-cmd">AT+HTTPREAD</span>
+        </button>
+        <button class="cmd-btn danger" onclick="send('AT+HTTPTERM')">
+          <span class="icon">🧹</span><span class="label">Finalizar HTTP</span><span class="at-cmd">AT+HTTPTERM</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="sidebar-section collapsed" id="sec-mqtt">
+      <h2 onclick="toggleSection('sec-mqtt')">MQTT <span class="chev">▼</span></h2>
+      <div class="sec-body">
+        <button class="cmd-btn success" onclick="send('AT+CMQTTSTART')">
+          <span class="icon">▶️</span><span class="label">Iniciar serviço</span><span class="at-cmd">AT+CMQTTSTART</span>
+        </button>
+        <button class="cmd-btn info" onclick="mqttAcquire()">
+          <span class="icon">🆔</span><span class="label">Adquirir cliente</span><span class="at-cmd">AT+CMQTTACCQ</span>
+        </button>
+        <button class="cmd-btn info" onclick="mqttConnect()">
+          <span class="icon">🔌</span><span class="label">Conectar broker</span><span class="at-cmd">AT+CMQTTCONNECT</span>
+        </button>
+        <button class="cmd-btn" onclick="mqttPublish()">
+          <span class="icon">📤</span><span class="label">Publicar</span><span class="at-cmd">AT+CMQTTPUB</span>
+        </button>
+        <button class="cmd-btn" onclick="mqttSubscribe()">
+          <span class="icon">📥</span><span class="label">Assinar tópico</span><span class="at-cmd">AT+CMQTTSUB</span>
+        </button>
+        <button class="cmd-btn danger" onclick="mqttDisconnect()">
+          <span class="icon">⛔</span><span class="label">Desconectar</span><span class="at-cmd">AT+CMQTTDISC</span>
+        </button>
+        <button class="cmd-btn danger" onclick="send('AT+CMQTTSTOP')">
+          <span class="icon">⏹️</span><span class="label">Parar serviço</span><span class="at-cmd">AT+CMQTTSTOP</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="sidebar-section collapsed" id="sec-fs">
+      <h2 onclick="toggleSection('sec-fs')">Arquivos / SSL <span class="chev">▼</span></h2>
+      <div class="sec-body">
+        <button class="cmd-btn" onclick="send('AT+FSCD?')">
+          <span class="icon">📂</span><span class="label">Diretório atual</span><span class="at-cmd">AT+FSCD?</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+FSLS')">
+          <span class="icon">📃</span><span class="label">Listar arquivos</span><span class="at-cmd">AT+FSLS</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+FSMEM')">
+          <span class="icon">💽</span><span class="label">Espaço livre</span><span class="at-cmd">AT+FSMEM</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CCERTLIST')">
+          <span class="icon">🔏</span><span class="label">Listar certificados</span><span class="at-cmd">AT+CCERTLIST</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CSSLCFG=&quot;sslversion&quot;,0,4')">
+          <span class="icon">🔐</span><span class="label">TLS 1.2 (ctx 0)</span><span class="at-cmd">AT+CSSLCFG</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CSSLCFG=&quot;authmode&quot;,0,0')">
+          <span class="icon">🛡️</span><span class="label">Sem verificação de CA</span><span class="at-cmd">authmode 0</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="sidebar-section collapsed" id="sec-hw">
+      <h2 onclick="toggleSection('sec-hw')">Hardware / Energia <span class="chev">▼</span></h2>
+      <div class="sec-body">
+        <button class="cmd-btn" onclick="send('AT+CBC');showTab('hw')">
+          <span class="icon">🔋</span><span class="label">Tensão de alimentação</span><span class="at-cmd">AT+CBC</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CPMUTEMP');showTab('hw')">
+          <span class="icon">🌡️</span><span class="label">Temperatura</span><span class="at-cmd">AT+CPMUTEMP</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CADC?');showTab('hw')">
+          <span class="icon">📉</span><span class="label">Leitura ADC</span><span class="at-cmd">AT+CADC?</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CCLK?')">
+          <span class="icon">🕐</span><span class="label">Ler data/hora</span><span class="at-cmd">AT+CCLK?</span>
+        </button>
+        <button class="cmd-btn success" onclick="syncClock()">
+          <span class="icon">🔄</span><span class="label">Sincronizar com PC</span><span class="at-cmd">AT+CCLK=</span>
+        </button>
+        <button class="cmd-btn info" onclick="ntpSync()">
+          <span class="icon">🛰️</span><span class="label">Sincronizar por NTP</span><span class="at-cmd">AT+CNTP</span>
+        </button>
+        <button class="cmd-btn" onclick="send('AT+CSCLK=0')">
+          <span class="icon">☀️</span><span class="label">Sleep OFF</span><span class="at-cmd">AT+CSCLK=0</span>
+        </button>
+        <button class="cmd-btn warn" onclick="send('AT+CSCLK=1')">
+          <span class="icon">🌙</span><span class="label">Sleep automático</span><span class="at-cmd">AT+CSCLK=1</span>
+        </button>
+        <button class="cmd-btn warn" onclick="send('AT+CFUN=4')">
+          <span class="icon">✈️</span><span class="label">Modo avião</span><span class="at-cmd">AT+CFUN=4</span>
+        </button>
+        <button class="cmd-btn success" onclick="send('AT+CFUN=1')">
+          <span class="icon">📡</span><span class="label">Rádio ON</span><span class="at-cmd">AT+CFUN=1</span>
+        </button>
+        <button class="cmd-btn danger" onclick="confirmReset()">
+          <span class="icon">🔁</span><span class="label">Reset do módulo</span><span class="at-cmd">AT+CRESET</span>
+        </button>
+        <button class="cmd-btn danger" onclick="confirmPowerOff()">
+          <span class="icon">⏻</span><span class="label">Desligar módulo</span><span class="at-cmd">AT+CPOF</span>
+        </button>
+      </div>
+    </div>
+
+  </aside>
+  <!-- MAIN -->
+  <main class="main">
+
+    <!-- TABS -->
+    <div class="tabs">
+      <div class="tab active" onclick="showTab('terminal', this)">Terminal</div>
+      <div class="tab" onclick="showTab('gnss', this)">GNSS</div>
+      <div class="tab" onclick="showTab('rede', this)">Rede</div>
+      <div class="tab" onclick="showTab('map', this)">Mapa</div>
+      <div class="tab" onclick="showTab('sms', this)">SMS</div>
+      <div class="tab" onclick="showTab('voz', this)">Voz</div>
+      <div class="tab" onclick="showTab('http', this)">HTTP</div>
+      <div class="tab" onclick="showTab('mqtt', this)">MQTT</div>
+      <div class="tab" onclick="showTab('tcp', this)">TCP/IP</div>
+      <div class="tab" onclick="showTab('fs', this)">Arquivos/SSL</div>
+      <div class="tab" onclick="showTab('hw', this)">Hardware</div>
+      <div class="tab" onclick="showTab('info', this)">Info</div>
+    </div>
+
+    <div class="panels">
+
+      <!-- ══════════ TERMINAL ══════════ -->
+      <div class="panel active" id="panel-terminal">
+        <div class="terminal-wrap" id="terminal"></div>
+        <div class="input-bar">
+          <input id="cmdInput" type="text" placeholder="Comando AT... (Enter envia, ↑/↓ histórico, Tab autocompleta)"
+            onkeydown="handleKey(event)" autocomplete="off" spellcheck="false" />
+          <button class="send-btn" onclick="sendFromInput()">Enviar</button>
+          <button class="clear-btn" onclick="sendCtrlZ()" title="Envia 0x1A (finaliza modo de dados)">Ctrl+Z</button>
+          <button class="clear-btn" onclick="sendEsc()" title="Envia 0x1B (cancela modo de dados)">ESC</button>
+          <button class="clear-btn" onclick="clearTerminal()">Limpar</button>
+          <button class="clear-btn" onclick="exportLog()" title="Baixa o log do terminal">⬇</button>
+        </div>
+      </div>
+
+      <!-- ══════════ GNSS ══════════ -->
+      <div class="panel" id="panel-gnss">
+        <div class="pane">
+
+          <div class="fix-banner">
+            <div class="fix-indicator nofix" id="gnss-fix-dot"></div>
+            <div class="fix-banner-text">
+              <div class="fix-banner-title" id="gnss-fix-title">Aguardando GNSS...</div>
+              <div class="fix-banner-sub" id="gnss-fix-sub">Nenhum dado recebido</div>
+            </div>
+            <a class="map-link" id="mapLink" href="#" target="_blank" style="display:none;">📍 Maps</a>
+          </div>
+
+          <div id="gnss-view-decoded">
+            <div class="grid-2">
+              <div>
+                <div class="section-title">Posição</div>
+                <div class="info-grid" style="grid-template-columns:1fr 1fr;">
+                  <div class="info-card highlight">
+                    <div class="card-label">Latitude</div>
+                    <div class="card-value" id="g-lat" style="font-size:17px;">--</div>
+                    <div class="card-unit" id="g-lat-dms">--</div>
+                  </div>
+                  <div class="info-card highlight">
+                    <div class="card-label">Longitude</div>
+                    <div class="card-value" id="g-lon" style="font-size:17px;">--</div>
+                    <div class="card-unit" id="g-lon-dms">--</div>
+                  </div>
+                  <div class="info-card">
+                    <div class="card-label">Altitude MSL</div>
+                    <div class="card-value" id="g-alt">--</div>
+                    <div class="card-unit">metros</div>
+                  </div>
+                  <div class="info-card">
+                    <div class="card-label">Modo do fix</div>
+                    <div class="card-value" id="g-fixmode" style="font-size:15px;">--</div>
+                    <div class="card-unit">2 = 2D · 3 = 3D</div>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div class="section-title">Movimento</div>
+                <div class="info-grid" style="grid-template-columns:1fr 1fr;">
+                  <div class="info-card">
+                    <div class="card-label">Velocidade</div>
+                    <div class="card-value" id="g-spd">--</div>
+                    <div class="card-unit">km/h</div>
+                  </div>
+                  <div class="info-card">
+                    <div class="card-label">Direção (COG)</div>
+                    <div class="card-value" id="g-cog">--</div>
+                    <div class="card-unit" id="g-cog-dir">graus (N=0°)</div>
+                  </div>
+                  <div class="info-card">
+                    <div class="card-label">Distância total</div>
+                    <div class="card-value" id="g-dist" style="font-size:16px;">0.00</div>
+                    <div class="card-unit">km acumulados no rastro</div>
+                  </div>
+                  <div class="info-card">
+                    <div class="card-label">Idade do dado</div>
+                    <div class="card-value" id="g-age" style="font-size:16px;">--</div>
+                    <div class="card-unit">desde o último frame</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid-3" style="margin-top:14px;">
+              <div>
+                <div class="section-title">Precisão DOP</div>
+                <div class="info-grid" style="grid-template-columns:1fr;">
+                  <div class="info-card"><div class="card-label">PDOP</div><div class="card-value" id="g-pdop">--</div><div class="card-unit">posição 3D</div></div>
+                  <div class="info-card"><div class="card-label">HDOP</div><div class="card-value" id="g-hdop">--</div><div class="card-unit">horizontal</div></div>
+                  <div class="info-card"><div class="card-label">VDOP</div><div class="card-value" id="g-vdop">--</div><div class="card-unit">vertical</div></div>
+                </div>
+              </div>
+
+              <div>
+                <div class="section-title">Satélites por constelação</div>
+                <div class="info-grid" style="grid-template-columns:1fr;">
+                  <div class="info-card"><div class="card-label">GPS</div><div class="card-value" id="g-sv-gps">--</div><div class="card-unit">em uso</div></div>
+                  <div class="info-card"><div class="card-label">GLONASS</div><div class="card-value" id="g-sv-glo">--</div><div class="card-unit">em uso</div></div>
+                  <div class="info-card"><div class="card-label">BeiDou</div><div class="card-value" id="g-sv-bds">--</div><div class="card-unit">em uso</div></div>
+                </div>
+              </div>
+
+              <div>
+                <div class="section-title">Tempo & qualidade</div>
+                <div class="info-grid" style="grid-template-columns:1fr;">
+                  <div class="info-card"><div class="card-label">UTC data/hora</div><div class="card-value" id="g-time" style="font-size:13px;">--</div><div class="card-unit">timestamp GNSS</div></div>
+                  <div class="info-card"><div class="card-label">Total em uso</div><div class="card-value" id="g-sv-total">--</div><div class="card-unit">satélites</div></div>
+                  <div class="info-card"><div class="card-label">C/N0 médio (NMEA)</div><div class="card-value" id="g-cn0">--</div><div class="card-unit">dBHz · via GSV</div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="gnss-view-raw" style="display:none;">
+            <div class="section-title">Frame +CGNSSINFO decodificado</div>
+            <div class="raw-box"><span class="raw-label">Último frame: </span><span id="gnss-raw-line">nenhum</span></div>
+            <table class="field-table" style="margin-top:8px;">
+              <thead>
+                <tr style="color:var(--text-dim);font-size:11px;">
+                  <td class="f-idx">#</td><td class="f-name">Campo</td><td class="f-raw">Valor bruto</td><td class="f-dec">Decodificado</td>
+                </tr>
+              </thead>
+              <tbody id="gnss-field-tbody">
+                <tr><td colspan="4" style="color:var(--text-dim);padding:10px 8px;">Aguardando AT+CGNSSINFO...</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div id="gnss-view-nmea" style="display:none;flex:1;min-height:0;display:none;flex-direction:column;gap:8px;">
+            <div class="section-title">Sentenças NMEA (AT+CGNSSTST=1)</div>
+            <div class="console-box" id="nmea-console">Ative o stream NMEA para ver as sentenças brutas.</div>
+          </div>
+
+          <div class="btn-row">
+            <button class="action-btn" onclick="send('AT+CGNSSINFO')">🔄 Atualizar</button>
+            <button class="action-btn secondary" onclick="gnssOn()">▶️ Ligar GNSS</button>
+            <button class="action-btn secondary" onclick="gnssOff()">⏹️ Desligar</button>
+
+            <div style="display:flex;align-items:center;gap:4px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;">
+              <span style="font-size:11px;color:var(--text-dim);">Constelações:</span>
+              <select id="gnssModeSel" style="background:transparent;border:none;color:var(--text);font-size:12px;outline:none;">
+                <option value="1">GPS</option>
+                <option value="2">BeiDou</option>
+                <option value="3" selected>GPS + GLONASS</option>
+                <option value="4">GPS + BeiDou</option>
+                <option value="5">GPS + Galileo</option>
+                <option value="6">GPS + GLONASS + Galileo</option>
+                <option value="7">Todas</option>
+              </select>
+              <button class="conn-btn connect" style="padding:3px 10px;font-size:11px;" onclick="applyGnssMode()">Aplicar</button>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:4px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;">
+              <span style="font-size:11px;color:var(--text-dim);">Poll:</span>
+              <select id="gnssPollInterval" style="background:transparent;border:none;color:var(--text);font-size:12px;outline:none;">
+                <option value="1">1s</option><option value="2" selected>2s</option>
+                <option value="5">5s</option><option value="10">10s</option><option value="30">30s</option>
+              </select>
+              <button class="conn-btn connect" style="padding:3px 10px;font-size:11px;" id="gnssPollBtn" onclick="toggleGnssPoll()">ON</button>
+            </div>
+
+            <div style="margin-left:auto;display:flex;gap:6px;">
+              <button class="view-toggle active" id="viewDecoded" onclick="setGnssView('decoded')">📊 Decodificado</button>
+              <button class="view-toggle" id="viewRaw" onclick="setGnssView('raw')">📋 Bruto</button>
+              <button class="view-toggle" id="viewNmea" onclick="setGnssView('nmea')">📡 NMEA</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ══════════ REDE ══════════ -->
+      <div class="panel" id="panel-rede">
+        <div class="pane">
+
+          <div class="section-title">Qualidade do sinal</div>
+          <div class="info-grid">
+            <div class="info-card highlight">
+              <div class="card-label">RSSI (CSQ)</div>
+              <div class="card-value big" id="n-rssi">--</div>
+              <div class="card-unit" id="n-rssi-dbm">0–31 · 99 = desconhecido</div>
+              <div class="meter"><div id="n-rssi-bar"></div></div>
+            </div>
+            <div class="info-card">
+              <div class="card-label">RSRP</div>
+              <div class="card-value big" id="n-rsrp">--</div>
+              <div class="card-unit">dBm · potência do sinal LTE</div>
+              <div class="meter"><div id="n-rsrp-bar"></div></div>
+            </div>
+            <div class="info-card">
+              <div class="card-label">RSRQ</div>
+              <div class="card-value big" id="n-rsrq">--</div>
+              <div class="card-unit">dB · qualidade LTE</div>
+              <div class="meter"><div id="n-rsrq-bar"></div></div>
+            </div>
+            <div class="info-card">
+              <div class="card-label">SINR</div>
+              <div class="card-value big" id="n-sinr">--</div>
+              <div class="card-unit">dB · relação sinal/ruído</div>
+              <div class="meter"><div id="n-sinr-bar"></div></div>
+            </div>
+          </div>
+
+          <div>
+            <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">Nível de sinal</div>
+            <div class="signal-bars" id="signalBars">
+              <div class="bar" style="height:10px;" id="b1"></div>
+              <div class="bar" style="height:16px;" id="b2"></div>
+              <div class="bar" style="height:22px;" id="b3"></div>
+              <div class="bar" style="height:28px;" id="b4"></div>
+              <div class="bar" style="height:34px;" id="b5"></div>
+            </div>
+          </div>
+
+          <div class="section-title">Célula servidora (AT+CPSI?)</div>
+          <div class="info-grid">
+            <div class="info-card"><div class="card-label">Tecnologia</div><div class="card-value" id="n-tech" style="font-size:16px;">--</div><div class="card-unit">modo de acesso</div></div>
+            <div class="info-card"><div class="card-label">Operadora</div><div class="card-value" id="n-oper" style="font-size:16px;">--</div><div class="card-unit" id="n-mccmnc">MCC/MNC</div></div>
+            <div class="info-card"><div class="card-label">Banda</div><div class="card-value" id="n-band" style="font-size:16px;">--</div><div class="card-unit" id="n-earfcn">EARFCN</div></div>
+            <div class="info-card"><div class="card-label">Cell ID</div><div class="card-value" id="n-cellid" style="font-size:16px;">--</div><div class="card-unit" id="n-pcid">PCID</div></div>
+            <div class="info-card"><div class="card-label">TAC / LAC</div><div class="card-value" id="n-tac" style="font-size:16px;">--</div><div class="card-unit">área de rastreamento</div></div>
+            <div class="info-card"><div class="card-label">Registro EPS</div><div class="card-value" id="n-cereg" style="font-size:15px;">--</div><div class="card-unit">AT+CEREG</div></div>
+            <div class="info-card"><div class="card-label">PS Attach</div><div class="card-value" id="n-cgatt" style="font-size:15px;">--</div><div class="card-unit">AT+CGATT</div></div>
+            <div class="info-card"><div class="card-label">Status SIM</div><div class="card-value" id="n-sim" style="font-size:15px;">--</div><div class="card-unit">AT+CPIN</div></div>
+            <div class="info-card"><div class="card-label">IP atribuído</div><div class="card-value" id="n-ip" style="font-size:14px;">--</div><div class="card-unit">AT+CGPADDR / AT+IPADDR</div></div>
+          </div>
+
+          <div class="section-title">Configuração</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>APN</label>
+              <input id="apnInput" type="text" placeholder="ex: claro.com.br / zap.vivo.com.br / tim.br" />
+            </div>
+            <div class="form-group" style="max-width:170px;">
+              <label>Usuário</label>
+              <input id="apnUser" type="text" placeholder="(opcional)" />
+            </div>
+            <div class="form-group" style="max-width:170px;">
+              <label>Senha</label>
+              <input id="apnPass" type="text" placeholder="(opcional)" />
+            </div>
+            <div class="form-group" style="max-width:210px;">
+              <label>Preferência de rede</label>
+              <select id="cnmpSel">
+                <option value="2" selected>2 — Automático</option>
+                <option value="13">13 — Somente GSM</option>
+                <option value="38">38 — Somente LTE</option>
+                <option value="51">51 — GSM + LTE</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="btn-row">
+            <button class="action-btn" onclick="applyApnFromPanel()">💾 Aplicar APN</button>
+            <button class="action-btn secondary" onclick="applyCnmp()">🔀 Aplicar modo de rede</button>
+            <button class="action-btn secondary" onclick="refreshNetwork()">🔄 Atualizar tudo</button>
+            <button class="action-btn secondary" onclick="send('AT+COPS=0')">🏢 Registro automático</button>
+            <button class="action-btn secondary" id="autoNetBtn" onclick="toggleAutoNetwork()">⚡ Auto 10s</button>
+            <button class="action-btn secondary" onclick="send('AT+CFUN=1,1')">🔁 Reiniciar rádio</button>
+          </div>
+
+          <div class="section-title">Saída bruta de rede</div>
+          <div class="console-box" id="net-console" style="min-height:90px;">Aguardando AT+CPSI? / AT+COPS=? ...</div>
+
+        </div>
+      </div>
+
+      <!-- ══════════ MAPA ══════════ -->
+      <div class="panel" id="panel-map">
+        <div id="map-wrapper">
+          <div id="map-infobar" style="
+            position:absolute;top:10px;left:50%;transform:translateX(-50%);
+            z-index:1000;background:rgba(22,27,34,0.92);border:1px solid var(--border);
+            border-radius:8px;padding:6px 16px;display:flex;gap:16px;align-items:center;
+            font-size:12px;pointer-events:none;backdrop-filter:blur(4px);white-space:nowrap;">
+            <span id="map-coord" style="color:var(--text);">Aguardando coordenadas...</span>
+            <span id="map-spd" style="color:var(--text-dim);"></span>
+            <span id="map-sat" style="color:var(--text-dim);"></span>
+            <span id="map-hdop" style="color:var(--text-dim);"></span>
+          </div>
+
+          <div id="map-controls" style="
+            position:absolute;bottom:14px;left:12px;right:12px;
+            z-index:1000;display:flex;gap:8px;flex-wrap:wrap;justify-content:center;pointer-events:none;">
+            <button class="action-btn secondary" onclick="showTab('gnss')">← GNSS</button>
+            <button class="action-btn" onclick="mapFollowToggle()" id="mapFollowBtn">📍 Seguir</button>
+            <button class="action-btn secondary" onclick="mapClearTrack()">🗑️ Limpar rastro</button>
+            <button class="action-btn secondary" onclick="mapFitTrack()">🔲 Ver tudo</button>
+            <button class="action-btn secondary" onclick="exportGpx()">⬇ GPX</button>
+          </div>
+
+          <div id="leaflet-map"></div>
+        </div>
+      </div>
+
+      <!-- ══════════ SMS ══════════ -->
+      <div class="panel" id="panel-sms">
+        <div class="pane">
+          <h3>Enviar SMS</h3>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Número destino</label>
+              <input type="tel" id="smsNumber" placeholder="+5511999999999" />
+            </div>
+            <div class="form-group" style="max-width:190px;">
+              <label>Codificação</label>
+              <select id="smsCharset">
+                <option value="GSM" selected>GSM (sem acento)</option>
+                <option value="UCS2">UCS2 (acentos/emoji)</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Mensagem <span id="smsCounter" class="pill">0 / 160</span></label>
+            <textarea id="smsMsg" rows="4" placeholder="Digite a mensagem..." oninput="updateSmsCounter()"></textarea>
+          </div>
+          <div class="btn-row">
+            <button class="action-btn" onclick="sendSMS()">📤 Enviar SMS</button>
+            <button class="action-btn secondary" onclick="send('AT+CMGL=&quot;ALL&quot;')">📥 Listar todos</button>
+            <button class="action-btn secondary" onclick="send('AT+CMGL=&quot;REC UNREAD&quot;')">✉️ Não lidos</button>
+            <button class="action-btn secondary" onclick="promptReadSms()">🔍 Ler índice</button>
+            <button class="action-btn secondary" onclick="smsInit()">⚙️ Preparar SMS</button>
+            <button class="action-btn danger" onclick="confirmDeleteAllSms()">🗑️ Apagar todos</button>
+          </div>
+
+          <div class="section-title">Caixa de entrada / eventos</div>
+          <div class="console-box" id="smsLog">Nenhum SMS recebido ainda.</div>
+        </div>
+      </div>
+
+      <!-- ══════════ VOZ ══════════ -->
+      <div class="panel" id="panel-voz">
+        <div class="pane">
+          <div class="info-grid">
+            <div class="info-card highlight"><div class="card-label">Estado da chamada</div><div class="card-value" id="v-state" style="font-size:16px;">Ociosa</div><div class="card-unit" id="v-number">--</div></div>
+            <div class="info-card"><div class="card-label">Duração</div><div class="card-value" id="v-dur">00:00</div><div class="card-unit">mm:ss</div></div>
+            <div class="info-card"><div class="card-label">Volume (CLVL)</div><div class="card-value" id="v-vol">--</div><div class="card-unit">0 a 5</div></div>
+            <div class="info-card"><div class="card-label">Canal de áudio</div><div class="card-value" id="v-dev" style="font-size:15px;">--</div><div class="card-unit">AT+CSDVC</div></div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Número</label>
+              <input type="tel" id="callNumber" placeholder="+5511999999999" />
+            </div>
+            <div class="form-group" style="max-width:200px;">
+              <label>Canal de áudio</label>
+              <select id="audioDevSel" onchange="applyAudioDevice()">
+                <option value="1">1 — Handset</option>
+                <option value="2">2 — Headset</option>
+                <option value="3" selected>3 — Speaker</option>
+              </select>
+            </div>
+            <div class="form-group" style="max-width:200px;">
+              <label>Volume <span id="volLabel" class="pill">3</span></label>
+              <input type="range" id="volRange" min="0" max="5" value="3" oninput="document.getElementById('volLabel').textContent=this.value" onchange="applyVolume()" />
+            </div>
+          </div>
+
+          <div class="btn-row">
+            <button class="action-btn" onclick="dialFromPanel()">📞 Ligar</button>
+            <button class="action-btn secondary" onclick="send('ATA')">✅ Atender</button>
+            <button class="action-btn danger" onclick="send('AT+CHUP')">📵 Desligar</button>
+            <button class="action-btn secondary" onclick="send('AT+CLCC')">📋 Status</button>
+            <button class="action-btn secondary" onclick="send('AT+CMUT=1')">🔇 Mutar mic</button>
+            <button class="action-btn secondary" onclick="send('AT+CMUT=0')">🎤 Desmutar</button>
+            <button class="action-btn secondary" onclick="send('AT+CLIP=1')">🆔 CLIP ON</button>
+          </div>
+
+          <div class="section-title">Teclado DTMF (AT+VTS)</div>
+          <div class="btn-row" id="dtmfPad"></div>
+
+          <div class="section-title">Eventos de chamada</div>
+          <div class="console-box" id="voz-console">Aguardando eventos de chamada...</div>
+        </div>
+      </div>
+
+      <!-- ══════════ HTTP ══════════ -->
+      <div class="panel" id="panel-http">
+        <div class="pane">
+          <h3>Cliente HTTP(S) — AT+HTTP*</h3>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>URL</label>
+              <input id="httpUrlInput" type="text" value="https://httpbin.org/get" placeholder="https://httpbin.org/get" />
+            </div>
+            <div class="form-group" style="max-width:160px;">
+              <label>Método</label>
+              <select id="httpMethodInput">
+                <option value="0" selected>GET</option>
+                <option value="1">POST</option>
+                <option value="2">HEAD</option>
+                <option value="3">DELETE</option>
+              </select>
+            </div>
+            <div class="form-group" style="max-width:200px;">
+              <label>Content-Type</label>
+              <input id="httpContentType" type="text" value="application/json" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Corpo (POST) — enviado via AT+HTTPDATA</label>
+            <textarea id="httpBody" rows="3" placeholder='{"sensor":1,"valor":42}'></textarea>
+          </div>
+
+          <div class="btn-row">
+            <button class="action-btn" onclick="httpRequest()">🚀 Executar requisição</button>
+            <button class="action-btn secondary" onclick="httpInit()">HTTPINIT</button>
+            <button class="action-btn secondary" onclick="httpSetURLFromInput()">HTTPPARA URL</button>
+            <button class="action-btn secondary" onclick="send('AT+HTTPHEAD')">HTTPHEAD</button>
+            <button class="action-btn secondary" onclick="httpReadAll()">HTTPREAD</button>
+            <button class="action-btn secondary" onclick="send('AT+HTTPTERM')">HTTPTERM</button>
+            <label class="conn-label" style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+              <input type="checkbox" id="httpSslChk" style="accent-color:var(--accent);" /> Forçar SSL ctx 0
+            </label>
+          </div>
+
+          <div class="info-grid" style="grid-template-columns:repeat(4,minmax(130px,1fr));">
+            <div class="info-card"><div class="card-label">Estado</div><div class="card-value" id="http-state" style="font-size:15px;">Ocioso</div></div>
+            <div class="info-card"><div class="card-label">Método</div><div class="card-value" id="http-method" style="font-size:15px;">GET</div></div>
+            <div class="info-card"><div class="card-label">Status HTTP</div><div class="card-value" id="http-status" style="font-size:15px;">--</div></div>
+            <div class="info-card"><div class="card-label">Bytes</div><div class="card-value" id="http-bytes" style="font-size:15px;">0</div></div>
+          </div>
+
+          <div class="form-group" style="flex:1;min-height:0;">
+            <label>Resposta</label>
+            <div class="console-box" id="http-response">Aguardando HTTPREAD...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════ MQTT ══════════ -->
+      <div class="panel" id="panel-mqtt">
+        <div class="pane">
+          <h3>Cliente MQTT — AT+CMQTT*</h3>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Broker</label>
+              <input id="mqttHost" type="text" value="tcp://broker.hivemq.com:1883" placeholder="tcp://host:1883 ou ssl://host:8883" />
+            </div>
+            <div class="form-group" style="max-width:190px;">
+              <label>Client ID</label>
+              <input id="mqttClientId" type="text" value="a7672sa-01" />
+            </div>
+            <div class="form-group" style="max-width:140px;">
+              <label>Keepalive</label>
+              <input id="mqttKeepalive" type="number" value="60" min="10" max="64800" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group" style="max-width:200px;">
+              <label>Usuário</label>
+              <input id="mqttUser" type="text" placeholder="(opcional)" />
+            </div>
+            <div class="form-group" style="max-width:200px;">
+              <label>Senha</label>
+              <input id="mqttPass" type="text" placeholder="(opcional)" />
+            </div>
+            <div class="form-group">
+              <label>Tópico</label>
+              <input id="mqttTopic" type="text" value="a7672sa/teste" />
+            </div>
+            <div class="form-group" style="max-width:110px;">
+              <label>QoS</label>
+              <select id="mqttQos"><option>0</option><option selected>1</option><option>2</option></select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Payload</label>
+            <textarea id="mqttPayload" rows="2">{"lat":0,"lon":0,"rssi":0}</textarea>
+          </div>
+
+          <div class="btn-row">
+            <button class="action-btn" onclick="mqttFullConnect()">🔌 Conectar (sequência)</button>
+            <button class="action-btn secondary" onclick="send('AT+CMQTTSTART')">START</button>
+            <button class="action-btn secondary" onclick="mqttAcquire()">ACCQ</button>
+            <button class="action-btn secondary" onclick="mqttConnect()">CONNECT</button>
+            <button class="action-btn" onclick="mqttPublish()">📤 Publicar</button>
+            <button class="action-btn secondary" onclick="mqttSubscribe()">📥 Assinar</button>
+            <button class="action-btn secondary" onclick="mqttUnsubscribe()">Cancelar assinatura</button>
+            <button class="action-btn danger" onclick="mqttDisconnect()">DISC + STOP</button>
+            <button class="action-btn secondary" onclick="mqttPublishGnss()">📍 Publicar posição</button>
+          </div>
+
+          <div class="info-grid" style="grid-template-columns:repeat(4,minmax(130px,1fr));">
+            <div class="info-card"><div class="card-label">Serviço</div><div class="card-value" id="mq-svc" style="font-size:15px;">Parado</div></div>
+            <div class="info-card"><div class="card-label">Cliente</div><div class="card-value" id="mq-client" style="font-size:15px;">--</div></div>
+            <div class="info-card"><div class="card-label">Conexão</div><div class="card-value" id="mq-conn" style="font-size:15px;">Desconectado</div></div>
+            <div class="info-card"><div class="card-label">Mensagens RX</div><div class="card-value" id="mq-rx" style="font-size:15px;">0</div></div>
+          </div>
+
+          <div class="form-group" style="flex:1;min-height:0;">
+            <label>Mensagens e eventos</label>
+            <div class="console-box" id="mqtt-console">Aguardando eventos MQTT...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════ TCP/IP ══════════ -->
+      <div class="panel" id="panel-tcp">
+        <div class="pane">
+          <h3>Sockets TCP/UDP — AT+NETOPEN / AT+CIPOPEN</h3>
+
+          <div class="form-row">
+            <div class="form-group" style="max-width:120px;">
+              <label>Link ID</label>
+              <input id="tcpLink" type="number" value="0" min="0" max="9" />
+            </div>
+            <div class="form-group" style="max-width:130px;">
+              <label>Protocolo</label>
+              <select id="tcpProto"><option value="TCP" selected>TCP</option><option value="UDP">UDP</option></select>
+            </div>
+            <div class="form-group">
+              <label>Host</label>
+              <input id="tcpHost" type="text" value="tcpbin.com" />
+            </div>
+            <div class="form-group" style="max-width:130px;">
+              <label>Porta</label>
+              <input id="tcpPort" type="number" value="4242" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Dados a enviar</label>
+            <textarea id="tcpData" rows="2">ping do A7672SA
+</textarea>
+          </div>
+
+          <div class="btn-row">
+            <button class="action-btn" onclick="tcpOpenFlow()">🔗 Abrir socket</button>
+            <button class="action-btn secondary" onclick="send('AT+NETOPEN')">NETOPEN</button>
+            <button class="action-btn secondary" onclick="send('AT+IPADDR')">IPADDR</button>
+            <button class="action-btn" onclick="tcpSend()">📤 Enviar</button>
+            <button class="action-btn secondary" onclick="tcpClose()">Fechar socket</button>
+            <button class="action-btn danger" onclick="send('AT+NETCLOSE')">NETCLOSE</button>
+            <button class="action-btn secondary" onclick="send('AT+CIPRXGET=1')">RX manual ON</button>
+          </div>
+
+          <div class="info-grid" style="grid-template-columns:repeat(4,minmax(130px,1fr));">
+            <div class="info-card"><div class="card-label">Rede</div><div class="card-value" id="tcp-net" style="font-size:15px;">Fechada</div></div>
+            <div class="info-card"><div class="card-label">IP local</div><div class="card-value" id="tcp-ip" style="font-size:14px;">--</div></div>
+            <div class="info-card"><div class="card-label">Socket</div><div class="card-value" id="tcp-sock" style="font-size:15px;">--</div></div>
+            <div class="info-card"><div class="card-label">Bytes RX</div><div class="card-value" id="tcp-rxbytes" style="font-size:15px;">0</div></div>
+          </div>
+
+          <div class="form-group" style="flex:1;min-height:0;">
+            <label>Tráfego do socket</label>
+            <div class="console-box" id="tcp-console">Aguardando dados...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════ ARQUIVOS / SSL ══════════ -->
+      <div class="panel" id="panel-fs">
+        <div class="pane">
+          <h3>Sistema de arquivos e certificados</h3>
+
+          <div class="form-row">
+            <div class="form-group" style="max-width:220px;">
+              <label>Diretório</label>
+              <select id="fsDir">
+                <option value="C:/" selected>C:/ (memória interna)</option>
+                <option value="D:/">D:/ (cartão SD)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Nome do arquivo</label>
+              <input id="fsName" type="text" placeholder="ca.pem" />
+            </div>
+          </div>
+
+          <div class="btn-row">
+            <button class="action-btn secondary" onclick="fsChangeDir()">📂 Selecionar diretório</button>
+            <button class="action-btn secondary" onclick="send('AT+FSLS')">📃 Listar</button>
+            <button class="action-btn secondary" onclick="send('AT+FSMEM')">💽 Espaço livre</button>
+            <button class="action-btn secondary" onclick="fsDelete()">🗑️ Apagar arquivo</button>
+            <button class="action-btn secondary" onclick="send('AT+CCERTLIST')">🔏 Listar certificados</button>
+            <button class="action-btn secondary" onclick="certDelete()">❌ Apagar certificado</button>
+          </div>
+
+          <div class="form-group">
+            <label>Conteúdo do certificado (PEM) — enviado com AT+CCERTDOWN</label>
+            <textarea id="certBody" rows="5" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group" style="max-width:170px;">
+              <label>Contexto SSL</label>
+              <input id="sslCtx" type="number" value="0" min="0" max="9" />
+            </div>
+            <div class="form-group" style="max-width:220px;">
+              <label>Versão TLS</label>
+              <select id="sslVer">
+                <option value="0">0 — SSL 3.0</option>
+                <option value="1">1 — TLS 1.0</option>
+                <option value="2">2 — TLS 1.1</option>
+                <option value="3">3 — TLS 1.2</option>
+                <option value="4" selected>4 — Todas</option>
+              </select>
+            </div>
+            <div class="form-group" style="max-width:250px;">
+              <label>Modo de autenticação</label>
+              <select id="sslAuth">
+                <option value="0" selected>0 — Sem verificação</option>
+                <option value="1">1 — Verificar servidor</option>
+                <option value="2">2 — Mútua (cliente + servidor)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="btn-row">
+            <button class="action-btn" onclick="certUpload()">⬆️ Enviar certificado</button>
+            <button class="action-btn secondary" onclick="sslApply()">🔐 Aplicar config SSL</button>
+            <button class="action-btn secondary" onclick="sslBindCa()">🔗 Vincular CA ao contexto</button>
+          </div>
+
+          <div class="form-group" style="flex:1;min-height:0;">
+            <label>Saída do filesystem</label>
+            <div class="console-box" id="fs-console">Aguardando comandos de arquivo...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════ HARDWARE ══════════ -->
+      <div class="panel" id="panel-hw">
+        <div class="pane">
+          <div class="info-grid">
+            <div class="info-card highlight"><div class="card-label">Alimentação</div><div class="card-value big" id="hw-vbat">--</div><div class="card-unit">V · AT+CBC</div></div>
+            <div class="info-card"><div class="card-label">Temperatura</div><div class="card-value big" id="hw-temp">--</div><div class="card-unit">°C · AT+CPMUTEMP</div></div>
+            <div class="info-card"><div class="card-label">ADC</div><div class="card-value big" id="hw-adc">--</div><div class="card-unit">mV · AT+CADC?</div></div>
+            <div class="info-card"><div class="card-label">Relógio do módulo</div><div class="card-value" id="hw-clock" style="font-size:14px;">--</div><div class="card-unit">AT+CCLK?</div></div>
+          </div>
+
+          <div class="section-title">GPIO</div>
+          <div class="form-row">
+            <div class="form-group" style="max-width:150px;">
+              <label>GPIO nº</label>
+              <input id="gpioNum" type="number" value="1" min="1" max="12" />
+            </div>
+            <div class="form-group" style="max-width:190px;">
+              <label>Direção</label>
+              <select id="gpioDir"><option value="0">0 — Entrada</option><option value="1" selected>1 — Saída</option></select>
+            </div>
+            <div class="form-group" style="max-width:190px;">
+              <label>Nível</label>
+              <select id="gpioVal"><option value="0">0 — Baixo</option><option value="1" selected>1 — Alto</option></select>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="action-btn secondary" onclick="gpioSetDir()">Definir direção (AT+CGDRT)</button>
+            <button class="action-btn" onclick="gpioWrite()">Escrever (AT+CGSETV)</button>
+            <button class="action-btn secondary" onclick="gpioRead()">Ler (AT+CGGETV)</button>
+          </div>
+
+          <div class="section-title">Relógio e temporização</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Servidor NTP</label>
+              <input id="ntpServer" type="text" value="pool.ntp.org" />
+            </div>
+            <div class="form-group" style="max-width:190px;">
+              <label>Fuso (quartos de hora)</label>
+              <input id="ntpZone" type="number" value="-12" />
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="action-btn secondary" onclick="send('AT+CBC')">🔋 Ler tensão</button>
+            <button class="action-btn secondary" onclick="send('AT+CPMUTEMP')">🌡️ Ler temperatura</button>
+            <button class="action-btn secondary" onclick="send('AT+CADC?')">📉 Ler ADC</button>
+            <button class="action-btn secondary" onclick="syncClock()">🔄 Hora do PC</button>
+            <button class="action-btn secondary" onclick="ntpSync()">🛰️ Sincronizar NTP</button>
+            <button class="action-btn secondary" onclick="send('AT+CTZU=1')">🌍 Fuso automático</button>
+            <button class="action-btn secondary" id="autoHwBtn" onclick="toggleAutoHw()">⚡ Auto 15s</button>
+          </div>
+
+          <div class="section-title">Energia</div>
+          <div class="btn-row">
+            <button class="action-btn secondary" onclick="send('AT+CFUN=0')">Rádio OFF (CFUN=0)</button>
+            <button class="action-btn secondary" onclick="send('AT+CFUN=4')">Modo avião</button>
+            <button class="action-btn secondary" onclick="send('AT+CFUN=1')">Rádio ON</button>
+            <button class="action-btn secondary" onclick="send('AT+CSCLK=1')">Sleep automático</button>
+            <button class="action-btn danger" onclick="confirmReset()">Reset</button>
+            <button class="action-btn danger" onclick="confirmPowerOff()">Desligar</button>
+          </div>
+
+          <div class="form-group" style="flex:1;min-height:0;">
+            <label>Saída de hardware</label>
+            <div class="console-box" id="hw-console">Aguardando leituras...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════ INFO ══════════ -->
+      <div class="panel" id="panel-info">
+        <div class="pane">
+          <div class="info-grid">
+            <div class="info-card highlight"><div class="card-label">Modelo</div><div class="card-value" id="i-model" style="font-size:16px;">--</div><div class="card-unit" id="i-manu">fabricante</div></div>
+            <div class="info-card"><div class="card-label">Firmware</div><div class="card-value" id="i-fw" style="font-size:14px;">--</div><div class="card-unit">AT+CGMR</div></div>
+            <div class="info-card"><div class="card-label">IMEI</div><div class="card-value" id="i-imei" style="font-size:15px;">--</div><div class="card-unit">AT+CGSN</div></div>
+            <div class="info-card"><div class="card-label">IMSI</div><div class="card-value" id="i-imsi" style="font-size:15px;">--</div><div class="card-unit">AT+CIMI</div></div>
+            <div class="info-card"><div class="card-label">ICCID</div><div class="card-value" id="i-iccid" style="font-size:14px;">--</div><div class="card-unit">AT+CICCID</div></div>
+            <div class="info-card"><div class="card-label">Número</div><div class="card-value" id="i-num" style="font-size:15px;">--</div><div class="card-unit">AT+CNUM</div></div>
+          </div>
+
+          <div class="btn-row">
+            <button class="action-btn" onclick="readIdentity()">🔍 Ler identificação</button>
+            <button class="action-btn secondary" onclick="send('AT+SIMCOMATI')">AT+SIMCOMATI</button>
+            <button class="action-btn secondary" onclick="send('AT+CGNSSPROD')">Versão GNSS</button>
+            <button class="action-btn secondary" onclick="copyDiagnostics()">📋 Copiar diagnóstico</button>
+          </div>
+
+          <div class="section-title">Recursos do A7672SA</div>
+          <div class="info-grid" id="featureGrid"></div>
+
+          <div class="section-title">Saída bruta</div>
+          <div class="console-box" id="info-console">Clique em "Ler identificação".</div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+<script>
+// ============================================================
+// A7672SA CONTROLLER — núcleo de comunicação
+// SIMCom A76XX AT command set (A7672SA / A7672E / A7670)
+// ============================================================
+
+// ── Estado global ─────────────────────────────────────────────
+let port = null, reader = null, writer = null;
+let connected = false;
+let connectedTransport = null;          // 'serial' | 'websocket' | 'simulator'
+let readBuffer = '';
+let cmdHistory = [], historyIdx = -1;
+let echoEnabled = true;
+
+let wsConn = null;
+
+// timers
+let gnssPollTimer = null, autoNetTimer = null, autoHwTimer = null, callTimer = null;
+
+// GNSS
+let fixSearchStart = null;
+let lastFixTs = 0;
+let trackDistanceKm = 0;
+let nmeaStreaming = false;
+
+// HTTP
+let httpReadPending = false;
+
+// MQTT
+let mqttRxCount = 0;
+let mqttRxState = null;     // {topic, payload}
+
+// TCP
+let tcpRxBytes = 0;
+
+// Identidade lida do módulo
+const identity = { manu:'', model:'', fw:'', imei:'', imsi:'', iccid:'', num:'' };
+
+// ============================================================
+// ESPERA DE RESPOSTA (waiters)
+// ============================================================
+const waiters = [];
+
+function waitFor(test, ms = 8000) {
+  return new Promise(resolve => {
+    const w = { test, resolve };
+    w.timer = setTimeout(() => {
+      const i = waiters.indexOf(w);
+      if (i >= 0) waiters.splice(i, 1);
+      resolve(null);
+    }, ms);
+    waiters.push(w);
+  });
+}
+
+function notifyWaiters(line) {
+  for (let i = waiters.length - 1; i >= 0; i--) {
+    let hit = false;
+    try { hit = waiters[i].test(line); } catch (_) {}
+    if (hit) {
+      clearTimeout(waiters[i].timer);
+      const w = waiters.splice(i, 1)[0];
+      w.resolve(line);
+    }
+  }
+}
+
+const isFinalLine = l => l === 'OK' || l === 'ERROR' || l.startsWith('ERROR')
+  || l.startsWith('+CME ERROR') || l.startsWith('+CMS ERROR');
+
+const waitOk     = (ms = 8000) => waitFor(isFinalLine, ms);
+const waitPrompt = (ms = 5000) => waitFor(l => l.startsWith('>'), ms);
+
+// Envia comando e aguarda OK/ERROR
+async function sendWait(cmd, ms = 8000) {
+  if (!requireConnection(`"${cmd}"`)) return null;
+  const p = waitOk(ms);
+  await send(cmd);
+  return await p;
+}
+
+// Envia um comando e espera a linha que casa com `test`, ignorando URCs que
+// cheguem no meio (GNSS em polling, MQTT, etc). Devolve null no timeout.
+async function queryValue(cmd, test, ms = 8000) {
+  if (!requireConnection(`"${cmd}"`)) return null;
+  const p = waitFor(test, ms);
+  await send(cmd);
+  return await p;
+}
+
+// ============================================================
+// TRANSPORTES
+// ============================================================
+function getConnMode() {
+  const sel = document.getElementById('connMode');
+  return sel ? sel.value : 'serial';
+}
+
+async function requestPorts() {
+  const mode = getConnMode();
+  if (mode === 'websocket') { wsListPorts(); return; }
+  if (!('serial' in navigator)) { log('sys', 'Web Serial API não suportada. Use Chrome/Edge/Opera.', 'err'); return; }
+  try {
+    const p = await navigator.serial.requestPort();
+    const info = p.getInfo();
+    const sel = document.getElementById('portSelect');
+    sel.innerHTML = '<option value="webserial">Porta selecionada (Web Serial)</option>';
+    sel.value = 'webserial';
+    window._detectedPort = p;
+    log('sys', `Porta detectada: VID=${info.usbVendorId?.toString(16) || '?'} PID=${info.usbProductId?.toString(16) || '?'}`, 'info');
+  } catch (e) {
+    log('sys', 'Nenhuma porta selecionada.', 'err');
+  }
+}
+
+async function toggleConnect() {
+  if (connected) await disconnect(); else await connect();
+}
+
+async function connect() {
+  const mode = getConnMode();
+  if (mode === 'websocket') await connectWebSocket();
+  else if (mode === 'simulator') enterSimulationMode();
+  else await connectSerial();
+
+  if (connected && document.getElementById('autoInitChk')?.checked) {
+    await delay(400);
+    runInitSequence();
+  }
+}
+
+async function connectSerial() {
+  if (!('serial' in navigator)) {
+    log('sys', '⚠️ Web Serial API indisponível neste navegador (use Chrome/Edge no desktop).', 'err');
+    log('sys', 'Para testar a interface sem hardware, escolha "Simulador" em Interface.', 'info');
+    setStatus('disconnected');
+    return;
+  }
+  try {
+    setStatus('connecting');
+    const baud = parseInt(document.getElementById('baudSelect').value, 10);
+    port = window._detectedPort || await navigator.serial.requestPort();
+    await port.open({ baudRate: baud, bufferSize: 65536 });
+    connected = true;
+    connectedTransport = 'serial';
+    setStatus('connected');
+    log('sys', `Conectado @ ${baud} baud (8N1).`, 'info');
+    document.getElementById('connInfo').textContent = `Serial ${baud} bps`;
+    readBuffer = '';
+    writer = port.writable.getWriter();
+    startReading();
+  } catch (e) {
+    setStatus('disconnected');
+    log('sys', `Erro ao conectar: ${e.message}`, 'err');
+  }
+}
+
+function connectWebSocket() {
+  const url = (document.getElementById('wsUrlInput')?.value || 'ws://127.0.0.1:8765').trim();
+  return new Promise(resolve => {
+    setStatus('connecting');
+    log('sys', `Conectando ao bridge: ${url}`, 'info');
+    wsConn = new WebSocket(url);
+
+    wsConn.onopen = () => {
+      const p = document.getElementById('portSelect').value;
+      const baud = parseInt(document.getElementById('baudSelect').value, 10);
+      wsConn.send(JSON.stringify({ type: 'open', port: p && p !== 'webserial' ? p : null, baud }));
+    };
+
+    wsConn.onmessage = ev => {
+      let msg = null;
+      try { msg = JSON.parse(ev.data); } catch (_) { processRx(ev.data + '\n'); return; }
+      if (msg.type === 'status') {
+        if (msg.state === 'open') {
+          connected = true;
+          connectedTransport = 'websocket';
+          setStatus('connected');
+          document.getElementById('connInfo').textContent = `Bridge → ${msg.port || 'serial'} @ ${msg.baud || ''}`;
+          log('sys', `Bridge conectado à porta ${msg.port} @ ${msg.baud} bps`, 'info');
+          resolve();
+        } else if (msg.state === 'error') {
+          setStatus('disconnected');
+          log('sys', `Bridge: ${msg.error}`, 'err');
+          resolve();
+        } else if (msg.state === 'closed') {
+          if (connected) { connected = false; connectedTransport = null; setStatus('disconnected'); log('sys', 'Porta fechada pelo bridge.', 'err'); }
+        }
+      } else if (msg.type === 'ports') {
+        fillPortList(msg.ports || []);
+      } else if (msg.type === 'rx') {
+        processRx(msg.data);
+      }
+    };
+
+    wsConn.onerror = () => { setStatus('disconnected'); log('sys', 'Erro no WebSocket. Rode: python a7672_bridge.py', 'err'); resolve(); };
+    wsConn.onclose = () => {
+      if (connected && connectedTransport === 'websocket') {
+        connected = false; connectedTransport = null; setStatus('disconnected');
+        document.getElementById('connInfo').textContent = '';
+        log('sys', 'WebSocket fechado.', 'err');
+      } else resolve();
+    };
+  });
+}
+
+function wsListPorts() {
+  const url = (document.getElementById('wsUrlInput')?.value || 'ws://127.0.0.1:8765').trim();
+  if (wsConn && wsConn.readyState === WebSocket.OPEN) { wsConn.send(JSON.stringify({ type: 'list' })); return; }
+  const probe = new WebSocket(url);
+  probe.onopen = () => probe.send(JSON.stringify({ type: 'list' }));
+  probe.onmessage = ev => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === 'ports') { fillPortList(msg.ports || []); probe.close(); }
+    } catch (_) {}
+  };
+  probe.onerror = () => log('sys', 'Bridge indisponível. Rode: python a7672_bridge.py', 'err');
+}
+
+function fillPortList(ports) {
+  const sel = document.getElementById('portSelect');
+  sel.innerHTML = '<option value="">-- selecionar --</option>';
+  ports.forEach(p => {
+    const o = document.createElement('option');
+    o.value = p.device;
+    o.textContent = `${p.device} — ${p.description || ''}`;
+    sel.appendChild(o);
+  });
+  log('sys', `${ports.length} porta(s) encontrada(s) pelo bridge.`, 'info');
+}
+
+async function disconnect() {
+  stopAllTimers();
+  try {
+    if (connectedTransport === 'serial') {
+      if (reader) { await reader.cancel(); reader = null; }
+      if (writer) { try { writer.releaseLock(); } catch (_) {} writer = null; }
+      if (port) { await port.close(); port = null; }
+    } else if (connectedTransport === 'websocket') {
+      if (wsConn) { try { wsConn.send(JSON.stringify({ type: 'close' })); } catch (_) {} wsConn.close(); wsConn = null; }
+    } else if (connectedTransport === 'simulator') {
+      stopSimTimers();
+    }
+  } catch (_) {}
+  connected = false;
+  connectedTransport = null;
+  setStatus('disconnected');
+  document.getElementById('connInfo').textContent = '';
+  log('sys', 'Desconectado.', 'info');
+}
+
+async function startReading() {
+  const decoder = new TextDecoder('utf-8', { fatal: false });
+  while (connected) {
+    try {
+      reader = port.readable.getReader();
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (value) processRx(decoder.decode(value, { stream: true }));
+      }
+    } catch (e) {
+      if (!connected) break;
+      log('sys', `Leitura: ${e.message} — reabrindo...`, 'info');
+    } finally {
+      try { reader.releaseLock(); } catch (_) {}
+      reader = null;
+    }
+    if (connected) await delay(200);
+  }
+}
+
+// ============================================================
+// RX — quebra em linhas, trata prompt '>' sem newline
+// ============================================================
+function processRx(chunk) {
+  readBuffer += chunk.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = readBuffer.split('\n');
+  readBuffer = lines.pop();
+
+  lines.forEach(raw => {
+    const line = raw.trim();
+    if (!line) return;
+    logRx(line);
+  });
+
+  // prompt de dados ('>' sem quebra de linha)
+  if (/^>\s*$/.test(readBuffer)) {
+    readBuffer = '';
+    logRx('>');
+  }
+}
+
+function logRx(line) {
+  let cls = '';
+  if (line === 'OK' || line === 'SEND OK' || /^\+CMQTT[A-Z]+: \d,0$/.test(line)) cls = 'ok';
+  else if (line.startsWith('ERROR') || line.startsWith('+CME ERROR') || line.startsWith('+CMS ERROR')) cls = 'err';
+  else if (line.startsWith('+') || line.startsWith('$')) cls = 'urc';
+  log('rx', line, cls);
+  notifyWaiters(line);
+  try { parseResponse(line); } catch (e) { console.error('parse', line, e); }
+}
+
+// ============================================================
+// TX
+// ============================================================
+async function writeRaw(text) {
+  if (!connected) return false;
+  if (connectedTransport === 'serial') {
+    if (!writer) throw new Error('Writer serial indisponível');
+    await writer.write(new TextEncoder().encode(text));
+  } else if (connectedTransport === 'websocket') {
+    if (!wsConn || wsConn.readyState !== WebSocket.OPEN) throw new Error('WebSocket fechado');
+    wsConn.send(JSON.stringify({ type: 'tx', data: text }));
+  } else {
+    return false;
+  }
+  return true;
+}
+
+// Nada é transmitido enquanto não houver um transporte ativo. Avisa no
+// terminal, mas sem inundá-lo quando uma macro dispara vários comandos.
+let lastNoConnWarn = 0;
+
+function requireConnection(what) {
+  if (connected) return true;
+  const now = Date.now();
+  if (now - lastNoConnWarn > 1500) {
+    lastNoConnWarn = now;
+    log('sys', `Desconectado — ${what} não enviado. Conecte-se ao módulo primeiro.`, 'err');
+  }
+  return false;
+}
+
+// Envia um comando AT (adiciona CR). Retorna false se nada foi enviado.
+async function send(cmd) {
+  if (!requireConnection(`"${cmd}"`)) return false;
+  if (cmdHistory[0] !== cmd) cmdHistory.unshift(cmd);
+  if (cmdHistory.length > 80) cmdHistory.pop();
+  historyIdx = -1;
+  lastCmd = cmd.trim().toUpperCase();
+  log('tx', cmd);
+  if (connectedTransport === 'simulator') { simulateResponse(cmd); return true; }
+  try { await writeRaw(cmd + '\r\n'); }
+  catch (e) { log('sys', `Erro ao enviar: ${e.message}`, 'err'); return false; }
+  return true;
+}
+
+// Envia dados brutos (payload após prompt '>')
+async function sendData(text, terminator = '\x1A') {
+  if (!requireConnection('payload')) return false;
+  log('tx', `${text.length > 120 ? text.slice(0,120) + '…' : text} ${terminator === '\x1A' ? '[CTRL+Z]' : ''}`);
+  if (connectedTransport === 'simulator') { simulateData(text); return true; }
+  try { await writeRaw(text + terminator); }
+  catch (e) { log('sys', `Erro ao enviar dados: ${e.message}`, 'err'); return false; }
+  return true;
+}
+
+function sendCtrlZ() {
+  if (!requireConnection('[CTRL+Z]')) return;
+  log('tx', '[CTRL+Z]');
+  if (connectedTransport === 'simulator') simulateData(''); else writeRaw('\x1A');
+}
+
+function sendEsc() {
+  if (!requireConnection('[ESC]')) return;
+  log('tx', '[ESC]');
+  if (connectedTransport !== 'simulator') writeRaw('\x1B');
+}
+
+function sendFromInput() {
+  const inp = document.getElementById('cmdInput');
+  const cmd = inp.value.trim();
+  if (!cmd) return;
+  send(cmd);
+  inp.value = '';
+}
+
+// ── autocompletar comandos ────────────────────────────────────
+const AT_SUGGESTIONS = [
+  'AT','ATI','ATE0','ATE1','AT&W','AT+SIMCOMATI','AT+CGMR','AT+CGSN','AT+CIMI','AT+CICCID','AT+CNUM',
+  'AT+CPIN?','AT+CFUN=1','AT+CFUN=0','AT+CFUN=4','AT+CFUN=1,1','AT+CRESET','AT+CPOF',
+  'AT+CSQ','AT+CESQ','AT+CPSI?','AT+CREG?','AT+CGREG?','AT+CEREG?','AT+COPS?','AT+COPS=?','AT+COPS=0',
+  'AT+CNMP?','AT+CNMP=2','AT+CNMP=38','AT+CNSMOD?','AT+CGATT?','AT+CGATT=1','AT+CGDCONT?','AT+CGPADDR',
+  'AT+CGNSSPWR=1','AT+CGNSSPWR=0','AT+CGNSSPWR?','AT+CGNSSINFO','AT+CGNSSMODE?','AT+CGNSSTST=1','AT+CGNSSTST=0',
+  'AT+CGNSSPORTSWITCH=0,1','AT+CGPSHOT','AT+CGPSCOLD','AT+CGPSWARM','AT+CAGPS','AT+CGNSSPROD',
+  'AT+CMGF=1','AT+CSCS="GSM"','AT+CSCS="UCS2"','AT+CNMI=2,1,0,0,0','AT+CMGL="ALL"','AT+CMGD=,4','AT+CPMS?','AT+CSCA?',
+  'ATA','ATH','AT+CHUP','AT+CLCC','AT+CLIP=1','AT+CPAS','AT+CLVL?','AT+CSDVC?','AT+CMUT=1',
+  'AT+NETOPEN','AT+NETCLOSE','AT+IPADDR','AT+CIPOPEN?','AT+CIPCLOSE=0','AT+CIPRXGET=1','AT+CDNSGIP="google.com"',
+  'AT+HTTPINIT','AT+HTTPTERM','AT+HTTPACTION=0','AT+HTTPACTION=1','AT+HTTPHEAD','AT+HTTPREAD=0,1024',
+  'AT+CMQTTSTART','AT+CMQTTSTOP','AT+CMQTTDISC=0,120','AT+CMQTTREL=0',
+  'AT+FSCD?','AT+FSLS','AT+FSMEM','AT+CCERTLIST','AT+CSSLCFG="sslversion",0,4',
+  'AT+CBC','AT+CPMUTEMP','AT+CADC?','AT+CCLK?','AT+CTZU=1','AT+CSCLK=0','AT+CSCLK=1'
+];
+
+function autocomplete() {
+  const inp = document.getElementById('cmdInput');
+  const v = inp.value.trim().toUpperCase();
+  if (!v) return;
+  const hits = AT_SUGGESTIONS.filter(s => s.toUpperCase().startsWith(v));
+  if (hits.length === 1) { inp.value = hits[0]; }
+  else if (hits.length > 1) { log('sys', hits.join('   '), 'info'); }
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter') { sendFromInput(); return; }
+  if (e.key === 'Tab') { e.preventDefault(); autocomplete(); return; }
+  if (e.key === 'ArrowUp') {
+    historyIdx = Math.min(historyIdx + 1, cmdHistory.length - 1);
+    document.getElementById('cmdInput').value = cmdHistory[historyIdx] || '';
+    e.preventDefault();
+  }
+  if (e.key === 'ArrowDown') {
+    historyIdx = Math.max(historyIdx - 1, -1);
+    document.getElementById('cmdInput').value = historyIdx < 0 ? '' : cmdHistory[historyIdx];
+    e.preventDefault();
+  }
+}
+
+// ============================================================
+// LOG
+// ============================================================
+function log(dir, msg, cls) {
+  const term = document.getElementById('terminal');
+  const atBottom = term.scrollHeight - term.scrollTop - term.clientHeight < 40;
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  const now = new Date();
+  const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}.${String(now.getMilliseconds()).padStart(3,'0')}`;
+  entry.innerHTML = `<span class="log-time">${ts}</span><span class="log-dir ${dir}">${dir.toUpperCase().padEnd(3)}</span><span class="log-msg ${cls||''}">${escHtml(msg)}</span>`;
+  term.appendChild(entry);
+  while (term.childElementCount > 2000) term.removeChild(term.firstChild);
+  if (atBottom) term.scrollTop = term.scrollHeight;
+}
+
+function clearTerminal() { document.getElementById('terminal').innerHTML = ''; }
+
+function exportLog() {
+  const text = Array.from(document.querySelectorAll('#terminal .log-entry'))
+    .map(e => e.textContent.replace(/\s+/g, ' ').trim()).join('\n');
+  downloadFile(`a7672sa-log-${Date.now()}.txt`, text, 'text/plain');
+}
+
+function downloadFile(name, content, mime) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([content], { type: mime }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function appendConsole(id, text, placeholder) {
+  const box = document.getElementById(id);
+  if (!box) return;
+  if (placeholder && box.textContent === placeholder) box.textContent = '';
+  const now = new Date();
+  const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+  box.textContent += `${box.textContent ? '\n' : ''}[${ts}] ${text}`;
+  while (box.textContent.length > 40000) box.textContent = box.textContent.slice(-30000);
+  box.scrollTop = box.scrollHeight;
+}
+
+function setStatus(state) {
+  const dot  = document.getElementById('statusDot');
+  const text = document.getElementById('statusText');
+  const btn  = document.getElementById('connectBtn');
+  dot.className = 'dot ' + state;
+  if (state === 'connected') {
+    text.textContent = 'Conectado'; btn.textContent = 'Desconectar';
+    btn.className = 'conn-btn disconnect'; btn.disabled = false;
+  } else if (state === 'connecting') {
+    text.textContent = 'Conectando...'; btn.textContent = 'Aguarde...'; btn.disabled = true;
+  } else {
+    text.textContent = 'Desconectado'; btn.textContent = 'Conectar';
+    btn.className = 'conn-btn connect'; btn.disabled = false;
+  }
+  setCommandsEnabled(state === 'connected');
+}
+
+// Trava os botões de comando AT enquanto não há transporte ativo
+function setCommandsEnabled(on) {
+  document.querySelectorAll('.cmd-btn').forEach(b => { b.disabled = !on; });
+  const inp = document.getElementById('cmdInput');
+  if (inp) {
+    inp.disabled = !on;
+    inp.placeholder = on
+      ? 'Comando AT... (Enter envia, ↑/↓ histórico, Tab autocompleta)'
+      : 'Conecte-se ao módulo para enviar comandos AT';
+  }
+  const sendBtn = document.querySelector('.send-btn');
+  if (sendBtn) sendBtn.disabled = !on;
+}
+
+function onConnModeChange() {
+  const mode = getConnMode();
+  const isWs = mode === 'websocket', isSim = mode === 'simulator';
+  const hasPort = !isSim;
+  const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+
+  show('portLabel', hasPort);
+  show('portSelect', hasPort);
+  show('baudLabel', hasPort);
+  show('baudSelect', hasPort);
+  show('wsUrlLabel', isWs);
+  show('wsUrlInput', isWs);
+
+  const detect = document.getElementById('detectBtn');
+  const info = document.getElementById('connInfo');
+  detect.style.display = isSim ? 'none' : '';
+  if (isSim) { info.textContent = 'Simulador — nada é enviado ao hardware'; }
+  else if (isWs) { detect.textContent = '🔍 Listar portas (bridge)'; info.textContent = 'Rode: python a7672_bridge.py'; }
+  else { detect.textContent = '🔍 Detectar Portas'; info.textContent = ''; }
+}
+
+function stopAllTimers() {
+  [gnssPollTimer, autoNetTimer, autoHwTimer].forEach(t => { if (t) clearInterval(t); });
+  gnssPollTimer = autoNetTimer = autoHwTimer = null;
+  const gb = document.getElementById('gnssPollBtn'); if (gb) gb.textContent = 'ON';
+}
+
+function enterSimulationMode() {
+  connected = true;
+  connectedTransport = 'simulator';
+  readBuffer = '';
+  setStatus('connected');
+  document.getElementById('connInfo').textContent = 'Simulador (sem hardware)';
+  log('sys', 'Modo SIMULAÇÃO: nada é enviado ao módulo — as respostas são sintéticas.', 'info');
+}
+
+// Para os timers do simulador (URCs de NMEA, SMS e MQTT)
+function stopSimTimers() {
+  ['nmeaTimer', 'smsUrcTimer', 'mqttSubTimer'].forEach(k => {
+    if (sim[k]) { clearInterval(sim[k]); sim[k] = null; }
+  });
+  sim.nmea = false;
+}
+// ============================================================
+// SIMULADOR A7672SA (sem hardware)
+// Reproduz o comportamento do firmware A76XX para todos os
+// subsistemas expostos na interface.
+// ============================================================
+const sim = {
+  echo: true,
+  cfun: 1,
+  cnmp: 2,
+  apn: 'claro.com.br',
+  gnssPwr: 0,
+  gnssMode: 3,
+  nmea: false,
+  nmeaTimer: null,
+  httpInit: false,
+  httpUrl: 'https://httpbin.org/get',
+  httpBody: '',
+  httpLastResp: '',
+  mqttStarted: false,
+  mqttClient: '',
+  mqttConn: false,
+  mqttTopic: '',
+  mqttPayload: '',
+  mqttSubTimer: null,
+  netOpen: false,
+  sockets: {},
+  clvl: 3,
+  csdvc: 3,
+  call: null,
+  smsUrcTimer: null,
+  smsIndex: 3,
+  files: ['ca.pem', 'log.txt'],
+  certs: ['ca.pem'],
+  gpio: {},
+  pending: null,          // modo de dados: {kind, meta}
+  pos: { lat: -23.55052, lon: -46.63331, course: 92, speedKn: 0, alt: 760.4 }
+};
+
+function simOut(lines, gap = 55) {
+  let t = 40;
+  lines.forEach(l => { setTimeout(() => logRx(l), t); t += gap; });
+  return t;
+}
+
+function simStepPosition() {
+  const p = sim.pos;
+  if (!sim.gnssPwr) return;
+  p.course = (p.course + (Math.random() - 0.5) * 14 + 360) % 360;
+  p.speedKn = Math.max(0, Math.min(38, p.speedKn + (Math.random() - 0.45) * 4));
+  const distKm = (p.speedKn * 1.852) * (2 / 3600);
+  const rad = p.course * Math.PI / 180;
+  p.lat += (distKm / 110.574) * Math.cos(rad);
+  p.lon += (distKm / (111.320 * Math.cos(p.lat * Math.PI / 180))) * Math.sin(rad);
+  p.alt = 760 + Math.sin(Date.now() / 30000) * 6;
+}
+
+function toNmeaLat(deg) {
+  const abs = Math.abs(deg), d = Math.floor(abs), m = (abs - d) * 60;
+  return `${String(d).padStart(2,'0')}${m.toFixed(6).padStart(9,'0')}`;
+}
+function toNmeaLon(deg) {
+  const abs = Math.abs(deg), d = Math.floor(abs), m = (abs - d) * 60;
+  return `${String(d).padStart(3,'0')}${m.toFixed(6).padStart(9,'0')}`;
+}
+
+function simCgnssinfo() {
+  if (!sim.gnssPwr) return '+CGNSSINFO: ,,,,,,,,';
+  simStepPosition();
+  const now = new Date();
+  const dd = String(now.getUTCDate()).padStart(2,'0');
+  const mo = String(now.getUTCMonth()+1).padStart(2,'0');
+  const yy = String(now.getUTCFullYear()).slice(-2);
+  const time = `${String(now.getUTCHours()).padStart(2,'0')}${String(now.getUTCMinutes()).padStart(2,'0')}${String(now.getUTCSeconds()).padStart(2,'0')}.00`;
+  const p = sim.pos;
+  const gps = 8 + Math.floor(Math.random()*4);
+  const glo = sim.gnssMode >= 3 ? 3 + Math.floor(Math.random()*3) : 0;
+  const bds = (sim.gnssMode === 2 || sim.gnssMode === 4 || sim.gnssMode === 7) ? 4 : 0;
+  return `+CGNSSINFO: 3,${String(gps).padStart(2,'0')},${String(glo).padStart(2,'0')},${String(bds).padStart(2,'0')},`
+       + `${toNmeaLat(p.lat)},${p.lat < 0 ? 'S' : 'N'},${toNmeaLon(p.lon)},${p.lon < 0 ? 'W' : 'E'},`
+       + `${dd}${mo}${yy},${time},${p.alt.toFixed(1)},${p.speedKn.toFixed(2)},${p.course.toFixed(1)},`
+       + `${(1.1 + Math.random()*0.5).toFixed(1)},${(0.8 + Math.random()*0.4).toFixed(1)},${(0.9 + Math.random()*0.4).toFixed(1)}`;
+}
+
+function nmeaChecksum(body) {
+  let c = 0;
+  for (let i = 0; i < body.length; i++) c ^= body.charCodeAt(i);
+  return c.toString(16).toUpperCase().padStart(2, '0');
+}
+function nmeaLine(body) { return `$${body}*${nmeaChecksum(body)}`; }
+
+function simNmeaBurst() {
+  simStepPosition();
+  const p = sim.pos;
+  const now = new Date();
+  const t = `${String(now.getUTCHours()).padStart(2,'0')}${String(now.getUTCMinutes()).padStart(2,'0')}${String(now.getUTCSeconds()).padStart(2,'0')}.00`;
+  const d = `${String(now.getUTCDate()).padStart(2,'0')}${String(now.getUTCMonth()+1).padStart(2,'0')}${String(now.getUTCFullYear()).slice(-2)}`;
+  const la = toNmeaLat(p.lat), lo = toNmeaLon(p.lon);
+  const ns = p.lat < 0 ? 'S' : 'N', ew = p.lon < 0 ? 'W' : 'E';
+  const sats = 9 + Math.floor(Math.random()*3);
+  logRx(nmeaLine(`GPGGA,${t},${la},${ns},${lo},${ew},1,${String(sats).padStart(2,'0')},0.9,${p.alt.toFixed(1)},M,-6.5,M,,`));
+  logRx(nmeaLine(`GPRMC,${t},A,${la},${ns},${lo},${ew},${p.speedKn.toFixed(2)},${p.course.toFixed(1)},${d},,,A`));
+  logRx(nmeaLine(`GPGSV,2,1,08,01,72,120,44,03,54,220,41,06,33,058,38,11,25,301,35`));
+  logRx(nmeaLine(`GPGSA,A,3,01,03,06,11,17,19,22,28,,,,,1.6,0.9,1.3`));
+}
+
+// ── Modo de dados: payload após o prompt '>' ou DOWNLOAD ──────
+function simulateData(text) {
+  const pend = sim.pending;
+  sim.pending = null;
+  if (!pend) { simOut(['OK']); return; }
+
+  switch (pend.kind) {
+    case 'sms':
+      simOut([`+CMGS: ${++sim.smsIndex}`, 'OK'], 200);
+      break;
+    case 'httpdata':
+      sim.httpBody = text;
+      simOut(['OK']);
+      break;
+    case 'mqtttopic':
+      sim.mqttTopic = text;
+      simOut(['OK']);
+      break;
+    case 'mqttpayload':
+      sim.mqttPayload = text;
+      simOut(['OK']);
+      break;
+    case 'mqttsubtopic':
+      sim.mqttTopic = text;
+      simOut(['OK', '+CMQTTSUB: 0,0'], 180);
+      startSimMqttFeed(text);
+      break;
+    case 'cipsend': {
+      const n = text.length;
+      simOut(['OK', `+CIPSEND: ${pend.link},${n},${n}`], 150);
+      setTimeout(() => {
+        const echo = `ECHO:${text.slice(0, 60)}`;
+        logRx(`RECV FROM:${pend.host || '203.0.113.7'}:${pend.port || 4242}`);
+        logRx(`+IPD${echo.length}`);
+        logRx(echo);
+      }, 700);
+      break;
+    }
+    case 'certdown':
+      if (!sim.certs.includes(pend.name)) sim.certs.push(pend.name);
+      if (!sim.files.includes(pend.name)) sim.files.push(pend.name);
+      simOut(['OK']);
+      break;
+    default:
+      simOut(['OK']);
+  }
+}
+
+function startSimMqttFeed(topic) {
+  if (sim.mqttSubTimer) clearInterval(sim.mqttSubTimer);
+  sim.mqttSubTimer = setInterval(() => {
+    if (!sim.mqttConn) { clearInterval(sim.mqttSubTimer); sim.mqttSubTimer = null; return; }
+    const payload = JSON.stringify({ ts: Date.now(), rnd: Math.round(Math.random()*100) });
+    logRx(`+CMQTTRXSTART: 0,${topic.length},${payload.length}`);
+    logRx(`+CMQTTRXTOPIC: 0,${topic.length}`);
+    logRx(topic);
+    logRx(`+CMQTTRXPAYLOAD: 0,${payload.length}`);
+    logRx(payload);
+    logRx('+CMQTTRXEND: 0');
+  }, 9000);
+}
+
+// ============================================================
+// Dispatcher principal do simulador
+// ============================================================
+function simulateResponse(cmd) {
+  const raw = cmd.trim();
+  const c = raw.toUpperCase();
+  const num = re => { const m = c.match(re); return m ? m[1] : null; };
+
+  setTimeout(() => {
+    // ── Básico ────────────────────────────────────────────────
+    if (c === 'AT') return simOut(['OK']);
+    if (c === 'ATE0') { sim.echo = false; return simOut(['OK']); }
+    if (c === 'ATE1') { sim.echo = true; return simOut(['OK']); }
+    if (c === 'AT&W' || c === 'AT&F' || c === 'ATZ') return simOut(['OK']);
+    if (c === 'ATI') return simOut(['A7672SA-FASE', 'OK'], 90);
+    if (c === 'AT+SIMCOMATI') return simOut([
+      'Manufacturer: SIMCOM INCORPORATED',
+      'Model: A7672SA-FASE',
+      'Revision: A011B04A7672M7_F',
+      'A7672M7_F,V1.04',
+      'IMEI: 869123045678901',
+      '+GCAP: +CGSM,+FCLASS,+DS',
+      'OK'
+    ], 70);
+    if (c === 'AT+CGMI') return simOut(['SIMCOM INCORPORATED', 'OK'], 80);
+    if (c === 'AT+CGMM') return simOut(['A7672SA-FASE', 'OK'], 80);
+    if (c === 'AT+CGMR') return simOut(['+CGMR: A011B04A7672M7_F', 'OK'], 80);
+    if (c === 'AT+CGSN' || c === 'AT+SIMEI?') return simOut(['869123045678901', 'OK'], 80);
+    if (c === 'AT+CIMI') return simOut(['724051234567890', 'OK'], 80);
+    if (c === 'AT+CICCID' || c === 'AT+CCID') return simOut(['+ICCID: 89550534567890123456', 'OK'], 80);
+    if (c === 'AT+CNUM') return simOut(['+CNUM: "","+5511987654321",145,7,4', 'OK'], 80);
+    if (c === 'AT+CPIN?') return simOut(['+CPIN: READY', 'OK'], 90);
+    if (c === 'AT+CPAS') return simOut([`+CPAS: ${sim.call ? 4 : 0}`, 'OK'], 80);
+
+    // ── Energia / relógio ─────────────────────────────────────
+    if (c.startsWith('AT+CFUN=')) {
+      sim.cfun = parseInt(c.split('=')[1], 10) || 0;
+      const out = ['OK'];
+      if (c.startsWith('AT+CFUN=1')) out.push('+CPIN: READY', 'SMS DONE', 'PB DONE');
+      return simOut(out, 500);
+    }
+    if (c === 'AT+CFUN?') return simOut([`+CFUN: ${sim.cfun}`, 'OK'], 80);
+    if (c === 'AT+CRESET') return simOut(['OK', 'START', '+CPIN: READY', 'SMS DONE', 'PB DONE'], 900);
+    if (c === 'AT+CPOF') return simOut(['OK', 'NORMAL POWER DOWN'], 500);
+    if (c.startsWith('AT+CSCLK=')) return simOut(['OK']);
+    if (c === 'AT+CBC') return simOut([`+CBC: ${(3.86 + Math.random() * 0.28).toFixed(3)}V`, 'OK'], 90);
+    if (c === 'AT+CPMUTEMP') return simOut([`+CPMUTEMP: ${(31 + Math.round(Math.random() * 9))}`, 'OK'], 90);
+    if (c === 'AT+CADC?') return simOut([`+CADC: 1,${900 + Math.round(Math.random() * 350)}`, 'OK'], 90);
+    if (c === 'AT+CCLK?') {
+      const d = new Date();
+      const z = Math.round(-d.getTimezoneOffset() / 15);
+      const s = `${String(d.getFullYear()).slice(-2)}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')},`
+              + `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`
+              + `${z >= 0 ? '+' : '-'}${String(Math.abs(z)).padStart(2,'0')}`;
+      return simOut([`+CCLK: "${s}"`, 'OK'], 80);
+    }
+    if (c.startsWith('AT+CCLK=') || c === 'AT+CTZU=1' || c.startsWith('AT+CTZU=')) return simOut(['OK']);
+    if (c.startsWith('AT+CNTP=')) return simOut(['OK']);
+    if (c === 'AT+CNTP') return simOut(['OK', '+CNTP: 0'], 900);
+
+    // ── GPIO ──────────────────────────────────────────────────
+    if (c.startsWith('AT+CGDRT=')) return simOut(['OK']);
+    if (c.startsWith('AT+CGSETV=')) {
+      const m = c.match(/AT\+CGSETV=(\d+),(\d+)/);
+      if (m) sim.gpio[m[1]] = m[2];
+      return simOut(['OK']);
+    }
+    if (c.startsWith('AT+CGGETV=')) {
+      const g = num(/AT\+CGGETV=(\d+)/);
+      return simOut([`+CGGETV: ${sim.gpio[g] ?? 0}`, 'OK'], 80);
+    }
+
+    // ── Rede ──────────────────────────────────────────────────
+    if (c === 'AT+CSQ') {
+      const rssi = 17 + Math.floor(Math.random() * 12);
+      return simOut([`+CSQ: ${rssi},99`, 'OK'], 80);
+    }
+    if (c === 'AT+CESQ') {
+      const rsrq = 18 + Math.floor(Math.random() * 8);   // idx → -19.5 + idx*0.5
+      const rsrp = 55 + Math.floor(Math.random() * 20);  // idx → -140 + idx
+      return simOut([`+CESQ: 99,99,255,255,${rsrq},${rsrp}`, 'OK'], 90);
+    }
+    if (c === 'AT+CPSI?') {
+      if (sim.cnmp === 13) {
+        return simOut([`+CPSI: GSM,Online,724-05,0x1a2b,26739,GSM 1800,-71,0,38-38`, 'OK'], 110);
+      }
+      const rsrp = -(78 + Math.floor(Math.random() * 25)) * 10;
+      const rsrq = -(75 + Math.floor(Math.random() * 40));
+      const rssi = -(55 + Math.floor(Math.random() * 25)) * 10;
+      const sinr = 6 + Math.floor(Math.random() * 18);
+      return simOut([`+CPSI: LTE,Online,724-05,0x1A2B,25671943,321,EUTRAN-BAND3,1650,5,5,${rsrq},${rsrp},${rssi},${sinr}`, 'OK'], 110);
+    }
+    if (c === 'AT+CNSMOD?') return simOut([`+CNSMOD: 0,${sim.cnmp === 13 ? 3 : 8}`, 'OK'], 80);
+    if (c === 'AT+CREG?')  return simOut(['+CREG: 0,1', 'OK'], 80);
+    if (c === 'AT+CGREG?') return simOut(['+CGREG: 0,1', 'OK'], 80);
+    if (c === 'AT+CEREG?') return simOut(['+CEREG: 2,1,"1A2B","0187E4C7",7', 'OK'], 80);
+    if (c === 'AT+COPS?')  return simOut(['+COPS: 0,0,"Claro BR",7', 'OK'], 90);
+    if (c === 'AT+COPS=?') return simOut([
+      '+COPS: (2,"Claro BR","Claro","72405",7),(1,"VIVO","VIVO","72410",7),(1,"TIM","TIM","72402",7),(1,"Claro BR","Claro","72405",0),,(0,1,2,3,4),(0,1,2)',
+      'OK'
+    ], 2200);
+    if (c.startsWith('AT+COPS=')) return simOut(['OK'], 600);
+    if (c === 'AT+CNMP?') return simOut([`+CNMP: ${sim.cnmp}`, 'OK'], 80);
+    if (c.startsWith('AT+CNMP=')) { sim.cnmp = parseInt(c.split('=')[1], 10) || 2; return simOut(['OK'], 400); }
+    if (c === 'AT+CGATT?') return simOut(['+CGATT: 1', 'OK'], 80);
+    if (c.startsWith('AT+CGATT=')) return simOut(['OK'], 500);
+    if (c === 'AT+CGDCONT?') return simOut([`+CGDCONT: 1,"IP","${sim.apn}","0.0.0.0",0,0,0,0`, 'OK'], 90);
+    if (c.startsWith('AT+CGDCONT=')) {
+      const m = raw.match(/AT\+CGDCONT=\d+,"[^"]*","([^"]*)"/i);
+      if (m) sim.apn = m[1];
+      return simOut(['OK']);
+    }
+    if (c.startsWith('AT+CGAUTH=')) return simOut(['OK']);
+    if (c === 'AT+CGPADDR' || c.startsWith('AT+CGPADDR=')) return simOut(['+CGPADDR: 1,"10.171.32.44"', 'OK'], 90);
+    if (c.startsWith('AT+CDNSGIP=')) {
+      const host = (raw.match(/"([^"]+)"/) || [,'google.com'])[1];
+      return simOut([`+CDNSGIP: 1,"${host}","142.250.79.14"`, 'OK'], 700);
+    }
+    if (c.startsWith('AT+CPING=')) {
+      const host = (raw.match(/"([^"]+)"/) || [,'8.8.8.8'])[1];
+      const lines = [];
+      for (let i = 1; i <= 4; i++) lines.push(`+CPING: 1,"${host}",64,${38 + Math.floor(Math.random()*40)},255`);
+      lines.push('+CPING: 3,4,4,0,38,71,52');
+      return simOut(['OK', ...lines], 450);
+    }
+
+    // ── GNSS ──────────────────────────────────────────────────
+    if (c.startsWith('AT+CGNSSPWR=')) {
+      const on = c.endsWith('=1');
+      sim.gnssPwr = on ? 1 : 0;
+      if (!on && sim.nmeaTimer) { clearInterval(sim.nmeaTimer); sim.nmeaTimer = null; sim.nmea = false; }
+      return simOut(on ? ['OK', '+CGNSSPWR: READY!'] : ['OK'], 1100);
+    }
+    if (c === 'AT+CGNSSPWR?') return simOut([`+CGNSSPWR: ${sim.gnssPwr},0`, 'OK'], 80);
+    if (c === 'AT+CGNSSINFO') return simOut([simCgnssinfo(), 'OK'], 100);
+    if (c.startsWith('AT+CGNSSINFO=')) return simOut(['OK']);
+    if (c === 'AT+CGNSSMODE?') return simOut([`+CGNSSMODE: ${sim.gnssMode}`, 'OK'], 80);
+    if (c.startsWith('AT+CGNSSMODE=')) { sim.gnssMode = parseInt(c.split('=')[1], 10) || 3; return simOut(['OK']); }
+    if (c.startsWith('AT+CGNSSNMEA=') || c.startsWith('AT+CGPSNMEARATE=') || c.startsWith('AT+CGNSSPORTSWITCH=')) return simOut(['OK']);
+    if (c.startsWith('AT+CGNSSTST=')) {
+      const on = c.endsWith('=1');
+      sim.nmea = on;
+      if (sim.nmeaTimer) { clearInterval(sim.nmeaTimer); sim.nmeaTimer = null; }
+      if (on) {
+        if (!sim.gnssPwr) return simOut(['+CME ERROR: 3']);
+        sim.nmeaTimer = setInterval(simNmeaBurst, 1000);
+      }
+      return simOut(['OK']);
+    }
+    if (c === 'AT+CGPSCOLD' || c === 'AT+CGPSWARM' || c === 'AT+CGPSHOT') {
+      sim.pos.speedKn = 0;
+      return simOut(['OK']);
+    }
+    if (c === 'AT+CAGPS') return simOut(['OK', '+AGPS: success.'], 1500);
+    if (c === 'AT+CGNSSPROD') return simOut(['+CGNSSPROD: MT3333_GNSS_v2.1', 'OK'], 90);
+
+    // ── SMS ───────────────────────────────────────────────────
+    if (c === 'AT+CMGF=1' || c === 'AT+CMGF=0') return simOut(['OK']);
+    if (c.startsWith('AT+CSCS=')) return simOut(['OK']);
+    if (c.startsWith('AT+CPMS=')) return simOut(['+CPMS: 3,50,3,50,3,50', 'OK'], 90);
+    if (c === 'AT+CPMS?') return simOut(['+CPMS: "SM",3,50,"SM",3,50,"SM",3,50', 'OK'], 90);
+    if (c === 'AT+CSCA?') return simOut(['+CSCA: "+5511995127777",145', 'OK'], 90);
+    if (c.startsWith('AT+CNMI=')) {
+      if (sim.smsUrcTimer) { clearInterval(sim.smsUrcTimer); sim.smsUrcTimer = null; }
+      if (c.startsWith('AT+CNMI=2,1') || c.startsWith('AT+CNMI=2,2')) {
+        sim.smsUrcTimer = setInterval(() => logRx(`+CMTI: "SM",${++sim.smsIndex}`), 20000);
+      }
+      return simOut(['OK']);
+    }
+    if (c.startsWith('AT+CMGS=')) {
+      sim.pending = { kind: 'sms' };
+      return simOut(['>'], 200);
+    }
+    if (c.startsWith('AT+CMGL')) return simOut([
+      '+CMGL: 1,"REC READ","+5511912345678","","26/08/10,09:12:44-12"',
+      'Bem-vindo ao plano de dados. Consulte saldo em *544#',
+      '+CMGL: 2,"REC UNREAD","+5511987654321","","26/08/12,11:03:07-12"',
+      'Teste de recepcao A7672SA',
+      'OK'
+    ], 120);
+    if (c.startsWith('AT+CMGR=')) {
+      const i = num(/AT\+CMGR=(\d+)/) || '1';
+      return simOut([`+CMGR: "REC READ","+5511987654321","","26/08/12,11:03:07-12"`, `Conteudo da mensagem ${i}`, 'OK'], 120);
+    }
+    if (c.startsWith('AT+CMGD')) return simOut(['OK'], 400);
+
+    // ── Voz ───────────────────────────────────────────────────
+    if (/^ATD/.test(c)) {
+      const n = raw.replace(/^ATD/i, '').replace(/;$/, '');
+      sim.call = { dir: 'out', num: n, start: Date.now() };
+      simOut(['OK']);
+      setTimeout(() => logRx('+CLCC: 1,0,3,0,0,"' + n + '",129'), 1200);
+      setTimeout(() => { if (sim.call) { logRx('NO CARRIER'); sim.call = null; } }, 12000);
+      return;
+    }
+    if (c === 'ATA') { if (sim.call) sim.call.answered = true; return simOut(['OK']); }
+    if (c === 'ATH' || c === 'AT+CHUP') { sim.call = null; return simOut(['OK', 'NO CARRIER'], 150); }
+    if (c === 'AT+CLCC') {
+      if (!sim.call) return simOut(['OK']);
+      return simOut([`+CLCC: 1,${sim.call.dir === 'out' ? 0 : 1},${sim.call.answered ? 0 : 3},0,0,"${sim.call.num}",129`, 'OK'], 90);
+    }
+    if (c.startsWith('AT+CLIP=') || c.startsWith('AT+CMUT=') || c.startsWith('AT+VTS=')) return simOut(['OK']);
+    if (c === 'AT+CLVL?') return simOut([`+CLVL: ${sim.clvl}`, 'OK'], 80);
+    if (c.startsWith('AT+CLVL=')) { sim.clvl = parseInt(c.split('=')[1], 10); return simOut(['OK']); }
+    if (c === 'AT+CSDVC?') return simOut([`+CSDVC: ${sim.csdvc}`, 'OK'], 80);
+    if (c.startsWith('AT+CSDVC=')) { sim.csdvc = parseInt(c.split('=')[1], 10); return simOut(['OK']); }
+
+    // ── TCP/IP ────────────────────────────────────────────────
+    if (c === 'AT+NETOPEN') {
+      if (sim.netOpen) return simOut(['+IP ERROR: Network is already opened', 'ERROR'], 150);
+      sim.netOpen = true;
+      return simOut(['OK', '+NETOPEN: 0'], 800);
+    }
+    if (c === 'AT+NETCLOSE') {
+      sim.netOpen = false; sim.sockets = {};
+      return simOut(['OK', '+NETCLOSE: 0'], 400);
+    }
+    if (c === 'AT+NETOPEN?') return simOut([`+NETOPEN: ${sim.netOpen ? 1 : 0}`, 'OK'], 80);
+    if (c === 'AT+IPADDR') return simOut(sim.netOpen ? ['+IPADDR: 10.171.32.44', 'OK'] : ['+IP ERROR: Network not opened', 'ERROR'], 90);
+    if (c.startsWith('AT+CIPOPEN=')) {
+      const m = raw.match(/AT\+CIPOPEN=(\d+),"(TCP|UDP)","([^"]+)",(\d+)/i);
+      if (!sim.netOpen) return simOut(['+IP ERROR: Network not opened', 'ERROR'], 150);
+      if (!m) return simOut(['ERROR']);
+      sim.sockets[m[1]] = { proto: m[2], host: m[3], port: m[4] };
+      return simOut(['OK', `+CIPOPEN: ${m[1]},0`], 900);
+    }
+    if (c === 'AT+CIPOPEN?') {
+      const lines = [];
+      for (let i = 0; i < 10; i++) {
+        const s = sim.sockets[i];
+        lines.push(s ? `+CIPOPEN: ${i},"${s.proto}","${s.host}",${s.port},-1` : `+CIPOPEN: ${i}`);
+      }
+      lines.push('OK');
+      return simOut(lines, 40);
+    }
+    if (c.startsWith('AT+CIPSEND=')) {
+      const m = c.match(/AT\+CIPSEND=(\d+)/);
+      const link = m ? m[1] : '0';
+      const s = sim.sockets[link];
+      if (!s) return simOut(['ERROR']);
+      sim.pending = { kind: 'cipsend', link, host: s.host, port: s.port };
+      return simOut(['>'], 180);
+    }
+    if (c.startsWith('AT+CIPCLOSE=')) {
+      const link = num(/AT\+CIPCLOSE=(\d+)/) || '0';
+      delete sim.sockets[link];
+      return simOut(['OK', `+CIPCLOSE: ${link},0`], 250);
+    }
+    if (c.startsWith('AT+CIPRXGET=')) return simOut(['OK']);
+    if (c.startsWith('AT+CIPMODE=')) return simOut(['OK']);
+
+    // ── HTTP ──────────────────────────────────────────────────
+    if (c === 'AT+HTTPINIT') { sim.httpInit = true; return simOut(['OK'], 250); }
+    if (c === 'AT+HTTPTERM') { sim.httpInit = false; sim.httpLastResp = ''; return simOut(['OK']); }
+    if (c.startsWith('AT+HTTPPARA=')) {
+      const m = raw.match(/AT\+HTTPPARA="URL","(.+)"$/i);
+      if (m) sim.httpUrl = m[1];
+      return simOut(sim.httpInit ? ['OK'] : ['+CME ERROR: 3']);
+    }
+    if (c.startsWith('AT+HTTPDATA=')) {
+      sim.pending = { kind: 'httpdata' };
+      return simOut(['DOWNLOAD'], 150);
+    }
+    if (c.startsWith('AT+HTTPACTION=')) {
+      if (!sim.httpInit) return simOut(['+CME ERROR: 3']);
+      const method = parseInt(num(/AT\+HTTPACTION=(\d)/) || '0', 10);
+      const name = ({0:'GET',1:'POST',2:'HEAD',3:'DELETE'})[method] || 'GET';
+      sim.httpLastResp = JSON.stringify({
+        ok: true, method: name, url: sim.httpUrl,
+        body: sim.httpBody || undefined,
+        module: 'A7672SA-FASE', ts: new Date().toISOString()
+      }, null, 1);
+      simOut(['OK']);
+      setTimeout(() => logRx(`+HTTPACTION: ${method},200,${sim.httpLastResp.length}`), 1300);
+      return;
+    }
+    if (c === 'AT+HTTPHEAD') {
+      const head = [
+        'HTTP/1.1 200 OK',
+        'content-type: application/json',
+        `content-length: ${sim.httpLastResp.length}`,
+        'server: gunicorn/19.9.0'
+      ].join('\n');
+      return simOut([`+HTTPHEAD: ${head.length}`, ...head.split('\n'), 'OK'], 70);
+    }
+    if (c.startsWith('AT+HTTPREAD')) {
+      if (!sim.httpInit) return simOut(['+CME ERROR: 3']);
+      const body = sim.httpLastResp || '';
+      return simOut([`+HTTPREAD: ${body.length}`, ...(body ? body.split('\n') : []), '+HTTPREAD: 0', 'OK'], 70);
+    }
+
+    // ── MQTT ──────────────────────────────────────────────────
+    if (c === 'AT+CMQTTSTART') {
+      if (sim.mqttStarted) return simOut(['+CMQTTSTART: 23', 'ERROR'], 150);
+      sim.mqttStarted = true;
+      return simOut(['OK', '+CMQTTSTART: 0'], 500);
+    }
+    if (c === 'AT+CMQTTSTOP') {
+      sim.mqttStarted = false; sim.mqttConn = false;
+      if (sim.mqttSubTimer) { clearInterval(sim.mqttSubTimer); sim.mqttSubTimer = null; }
+      return simOut(['OK', '+CMQTTSTOP: 0'], 350);
+    }
+    if (c.startsWith('AT+CMQTTACCQ=')) {
+      const m = raw.match(/AT\+CMQTTACCQ=\d+,"([^"]*)"/i);
+      sim.mqttClient = m ? m[1] : 'client0';
+      return simOut(sim.mqttStarted ? ['OK'] : ['ERROR']);
+    }
+    if (c.startsWith('AT+CMQTTREL=')) { sim.mqttClient = ''; return simOut(['OK']); }
+    if (c.startsWith('AT+CMQTTSSLCFG=')) return simOut(['OK']);
+    if (c.startsWith('AT+CMQTTWILL')) { sim.pending = { kind: 'mqtttopic' }; return simOut(['>'], 120); }
+    if (c.startsWith('AT+CMQTTCONNECT=')) {
+      if (!sim.mqttStarted) return simOut(['ERROR']);
+      sim.mqttConn = true;
+      return simOut(['OK', '+CMQTTCONNECT: 0,0'], 1200);
+    }
+    if (c.startsWith('AT+CMQTTDISC=')) {
+      sim.mqttConn = false;
+      if (sim.mqttSubTimer) { clearInterval(sim.mqttSubTimer); sim.mqttSubTimer = null; }
+      return simOut(['OK', '+CMQTTDISC: 0,0'], 400);
+    }
+    if (c.startsWith('AT+CMQTTTOPIC=')) { sim.pending = { kind: 'mqtttopic' }; return simOut(['>'], 120); }
+    if (c.startsWith('AT+CMQTTPAYLOAD=')) { sim.pending = { kind: 'mqttpayload' }; return simOut(['>'], 120); }
+    if (c.startsWith('AT+CMQTTPUB=')) {
+      if (!sim.mqttConn) return simOut(['+CMQTTPUB: 0,13', 'ERROR'], 200);
+      return simOut(['OK', '+CMQTTPUB: 0,0'], 500);
+    }
+    if (c.startsWith('AT+CMQTTSUBTOPIC=') || c.startsWith('AT+CMQTTSUB=')) {
+      if (!sim.mqttConn) return simOut(['ERROR']);
+      sim.pending = { kind: 'mqttsubtopic' };
+      return simOut(['>'], 120);
+    }
+    if (c.startsWith('AT+CMQTTUNSUB=')) {
+      if (sim.mqttSubTimer) { clearInterval(sim.mqttSubTimer); sim.mqttSubTimer = null; }
+      return simOut(['>'], 120);
+    }
+
+    // ── Arquivos / SSL ────────────────────────────────────────
+    if (c === 'AT+FSCD?') return simOut(['+FSCD: C:/', 'OK'], 80);
+    if (c.startsWith('AT+FSCD=')) return simOut([`+FSCD: ${raw.split('=')[1]}`, 'OK'], 80);
+    if (c === 'AT+FSLS') return simOut(['+FSLS: FILES:', ...sim.files, 'OK'], 70);
+    if (c === 'AT+FSMEM') return simOut(['+FSMEM: C:(11348480, 3620864 bytes)', 'OK'], 90);
+    if (c.startsWith('AT+FSDEL=')) {
+      const n = (raw.match(/AT\+FSDEL=(.+)$/i) || [,''])[1].replace(/"/g,'').trim();
+      sim.files = sim.files.filter(f => f !== n);
+      return simOut(['OK']);
+    }
+    if (c === 'AT+CCERTLIST') return simOut([...sim.certs.map(x => `+CCERTLIST: "${x}"`), 'OK'], 80);
+    if (c.startsWith('AT+CCERTDOWN=')) {
+      const n = (raw.match(/"([^"]+)"/) || [,'cert.pem'])[1];
+      sim.pending = { kind: 'certdown', name: n };
+      return simOut(['>'], 150);
+    }
+    if (c.startsWith('AT+CCERTDELE=')) {
+      const n = (raw.match(/"([^"]+)"/) || [,''])[1];
+      sim.certs = sim.certs.filter(x => x !== n);
+      return simOut(['OK']);
+    }
+    if (c.startsWith('AT+CSSLCFG=')) return simOut(['OK']);
+
+    // ── Fallback ──────────────────────────────────────────────
+    if (c.endsWith('?')) return simOut([`+CME ERROR: operation not supported`], 120);
+    return simOut(['OK']);
+  }, 100 + Math.random() * 90);
+}
+// ============================================================
+// PARSERS DE RESPOSTA / URC
+// ============================================================
+let lastCmd = '';
+let httpExpectedLen = 0;
+let headCapture = false;
+
+// URCs que podem chegar no meio de um payload (GNSS, MQTT, rede, chamada) e que
+// portanto não fazem parte do corpo de um HTTPREAD em andamento.
+const URC_PREFIXES = /^(\$G|\$B|\+CGNSSINFO|\+CGNSSPWR|\+CMQTT|\+CMTI|\+CMT:|\+CLIP|\+CREG|\+CGREG|\+CEREG|\+CSQ|\+CPSI|\+CIPRXGET|\+IPD|RECV FROM|RING|NO CARRIER|MISSED_CALL)/;
+
+function parseResponse(line) {
+  // NMEA bruto — sempre tem prioridade, chega intercalado com qualquer outra coisa
+  if (line.startsWith('$G') || line.startsWith('$B')) { parseNmea(line); return; }
+
+  // Corpo de HTTPREAD em andamento
+  if (httpReadPending) {
+    if (isFinalLine(line)) {
+      httpReadPending = false;
+      setText('http-state', line === 'OK' ? 'Concluído' : 'Erro');
+    } else if (/^\+HTTPREAD: 0$/.test(line)) {
+      httpReadPending = false;
+      setText('http-state', 'Concluído');
+    } else if (!line.startsWith('+HTTPREAD:') && !URC_PREFIXES.test(line)) {
+      appendHttpResponse(line);
+      return;
+    }
+  }
+
+  // GNSS
+  if (line.startsWith('+CGNSSINFO:')) return parseCGNSSINFO(line);
+  if (line.startsWith('+CGNSSPWR:')) return parseGnssPwr(line);
+  if (line.includes('+CGNSSPWR: READY')) return log('sys', 'GNSS pronto.', 'info');
+
+  // Sinal / rede
+  if (line.startsWith('+CSQ:'))    return parseCSQ(line);
+  if (line.startsWith('+CESQ:'))   return parseCESQ(line);
+  if (line.startsWith('+CPSI:'))   return parseCPSI(line);
+  if (line.startsWith('+CEREG:'))  return parseCxREG(line, 'n-cereg', 'EPS');
+  if (line.startsWith('+CREG:'))   return parseCxREG(line, null, 'CS');
+  if (line.startsWith('+CGREG:'))  return parseCxREG(line, null, 'GPRS');
+  if (line.startsWith('+COPS:'))   return parseCOPS(line);
+  if (line.startsWith('+CGATT:'))  return setText('n-cgatt', line.includes('1') ? 'Anexado' : 'Desanexado');
+  if (line.startsWith('+CPIN:'))   return setText('n-sim', line.replace('+CPIN:', '').trim());
+  if (line.startsWith('+CGPADDR:') || line.startsWith('+IPADDR:')) return parseIpAddr(line);
+  if (line.startsWith('+CNMP:'))   return appendConsole('net-console', line, null);
+  if (line.startsWith('+CNSMOD:')) return parseCNSMOD(line);
+  if (line.startsWith('+CDNSGIP:') || line.startsWith('+CPING:')) return appendConsole('net-console', line, null);
+
+  // HTTP
+  if (line.startsWith('+HTTPACTION:')) return parseHTTPACTION(line);
+  if (line.startsWith('+HTTPREAD:'))   return parseHTTPREAD(line);
+  if (line.startsWith('+HTTPHEAD:'))   { headCapture = true; setHttpResponse(''); return; }
+  if (headCapture) {
+    if (isFinalLine(line)) { headCapture = false; return; }
+    appendHttpResponse(line);
+    return;
+  }
+
+  // MQTT
+  if (line.startsWith('+CMQTT')) return parseMqtt(line);
+  if (mqttRxState) return parseMqttBody(line);
+
+  // TCP/IP
+  if (line.startsWith('+NETOPEN:'))  { setText('tcp-net', line.trim().endsWith('0') ? 'Aberta' : 'Falha'); return appendConsole('tcp-console', line, 'Aguardando dados...'); }
+  if (line.startsWith('+NETCLOSE:')) { setText('tcp-net', 'Fechada'); setText('tcp-sock', '--'); return appendConsole('tcp-console', line, 'Aguardando dados...'); }
+  if (line.startsWith('+CIPOPEN:'))  return parseCipOpen(line);
+  if (line.startsWith('+CIPCLOSE:')) { setText('tcp-sock', 'Fechado'); return appendConsole('tcp-console', line, 'Aguardando dados...'); }
+  if (line.startsWith('+CIPSEND:') || line.startsWith('RECV FROM:') || line.startsWith('+IPD') || line.startsWith('+CIPRXGET:'))
+    return parseTcpData(line);
+  if (line.startsWith('+IP ERROR:')) return appendConsole('tcp-console', line, 'Aguardando dados...');
+
+  // SMS
+  if (line.startsWith('+CMTI:')) { appendConsole('smsLog', `Nova mensagem: ${line}`, 'Nenhum SMS recebido ainda.'); log('sys', 'SMS recebido — use "Ler índice" para abrir.', 'info'); return; }
+  if (line.startsWith('+CMT:') || line.startsWith('+CMGL:') || line.startsWith('+CMGR:') || line.startsWith('+CMGS:'))
+    { smsCapture = line.startsWith('+CMT:') || line.startsWith('+CMGL:') || line.startsWith('+CMGR:'); return appendConsole('smsLog', line, 'Nenhum SMS recebido ainda.'); }
+  if (smsCapture) {
+    smsCapture = false;
+    if (!isFinalLine(line)) return appendConsole('smsLog', `   ${line}`, 'Nenhum SMS recebido ainda.');
+  }
+
+  // Voz
+  if (line === 'RING' || line.startsWith('+CLIP:') || line.startsWith('+CLCC:')
+      || line === 'NO CARRIER' || line === 'BUSY' || line === 'NO ANSWER' || line.startsWith('MISSED_CALL:'))
+    return parseVoice(line);
+
+  // Hardware
+  if (line.startsWith('+CBC:'))      return parseCBC(line);
+  if (line.startsWith('+CPMUTEMP:')) return parseTemp(line);
+  if (line.startsWith('+CADC:'))     return parseAdc(line);
+  if (line.startsWith('+CCLK:'))     return parseClock(line);
+  if (line.startsWith('+CGGETV:'))   return appendConsole('hw-console', `GPIO leitura: ${line}`, 'Aguardando leituras...');
+
+  // Arquivos / certificados
+  if (line.startsWith('+FS') || line.startsWith('+CCERTLIST:'))
+    return appendConsole('fs-console', line, 'Aguardando comandos de arquivo...');
+
+  // Identificação
+  parseIdentity(line);
+}
+
+let smsCapture = false;
+
+function setText(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
+
+// ── GNSS ──────────────────────────────────────────────────────
+const CGNSSINFO_FIELDS = [
+  { name: 'Modo do fix',        decode: v => ({ '2':'2D Fix', '3':'3D Fix' }[v] || (v ? v : 'Sem fix')) },
+  { name: 'Satélites GPS',      decode: v => v ? `${parseInt(v,10)} em uso` : '--' },
+  { name: 'Satélites GLONASS',  decode: v => v ? `${parseInt(v,10)} em uso` : '--' },
+  { name: 'Satélites BeiDou',   decode: v => v ? `${parseInt(v,10)} em uso` : '--' },
+  { name: 'Latitude (ddmm.mm)', decode: v => v ? `${nmeaToDeg(v).toFixed(6)}°` : '--' },
+  { name: 'Hemisfério N/S',     decode: v => ({ N:'Norte', S:'Sul' }[v] || '--') },
+  { name: 'Longitude (dddmm)',  decode: v => v ? `${nmeaToDeg(v).toFixed(6)}°` : '--' },
+  { name: 'Hemisfério E/W',     decode: v => ({ E:'Leste', W:'Oeste' }[v] || '--') },
+  { name: 'Data (ddmmaa)',      decode: v => v && v.length === 6 ? `${v.slice(0,2)}/${v.slice(2,4)}/20${v.slice(4,6)}` : '--' },
+  { name: 'Hora UTC',           decode: v => v && v.length >= 6 ? `${v.slice(0,2)}:${v.slice(2,4)}:${v.slice(4,6)} UTC` : '--' },
+  { name: 'Altitude MSL',       decode: v => v ? `${parseFloat(v).toFixed(1)} m` : '--' },
+  { name: 'Velocidade',         decode: v => v ? `${(parseFloat(v)*1.852).toFixed(2)} km/h  (${parseFloat(v).toFixed(2)} nós)` : '--' },
+  { name: 'Course (COG)',       decode: v => v ? `${parseFloat(v).toFixed(1)}°  ${cogToDir(parseFloat(v))}` : '--' },
+  { name: 'PDOP',               decode: v => v ? `${parseFloat(v).toFixed(1)}  (${dopQual(parseFloat(v))})` : '--' },
+  { name: 'HDOP',               decode: v => v ? `${parseFloat(v).toFixed(1)}  (${dopQual(parseFloat(v))})` : '--' },
+  { name: 'VDOP',               decode: v => v ? `${parseFloat(v).toFixed(1)}  (${dopQual(parseFloat(v))})` : '--' },
+];
+
+function nmeaToDeg(v) {
+  const f = parseFloat(v);
+  if (isNaN(f)) return NaN;
+  const deg = Math.floor(f / 100);
+  return deg + (f - deg * 100) / 60;
+}
+
+function parseCGNSSINFO(line) {
+  const raw = line.replace('+CGNSSINFO:', '').trim();
+  const parts = raw.split(',');
+  setText('gnss-raw-line', line);
+
+  const p = i => (parts[i] || '').trim();
+  const hasFix = !!p(4) && !!p(6);
+
+  const dot   = document.getElementById('gnss-fix-dot');
+  const title = document.getElementById('gnss-fix-title');
+  const sub   = document.getElementById('gnss-fix-sub');
+
+  if (!hasFix) {
+    if (!fixSearchStart) fixSearchStart = Date.now();
+    dot.className = 'fix-indicator nofix';
+    const elapsed = Math.floor((Date.now() - fixSearchStart) / 1000);
+    title.textContent = `🔍 Buscando fix... (${elapsed}s)`;
+    sub.textContent = 'Sem posição válida. Antena com vista para o céu, TTFF a frio pode levar 30–90 s.';
+    renderGnssTable(parts, hasFix);
+    return;
+  }
+
+  fixSearchStart = null;
+  const lat = nmeaToDeg(p(4)) * (p(5) === 'S' ? -1 : 1);
+  const lon = nmeaToDeg(p(6)) * (p(7) === 'W' ? -1 : 1);
+  const alt = parseFloat(p(10));
+  const spdKmh = (parseFloat(p(11)) || 0) * 1.852;
+  const cog = parseFloat(p(12)) || 0;
+  const pdop = p(13), hdop = p(14), vdop = p(15);
+  const svGps = parseInt(p(1), 10) || 0, svGlo = parseInt(p(2), 10) || 0, svBds = parseInt(p(3), 10) || 0;
+  const total = svGps + svGlo + svBds;
+
+  dot.className = 'fix-indicator fix';
+  title.textContent = `Fix ${p(0) === '3' ? '3D' : '2D'} — ${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+  sub.textContent = `Alt ${isNaN(alt) ? '--' : alt.toFixed(0)} m · ${total} satélites · HDOP ${hdop || '--'} · ${p(9).slice(0,2)}:${p(9).slice(2,4)}:${p(9).slice(4,6)} UTC`;
+
+  setText('g-lat', lat.toFixed(6) + '°');
+  setText('g-lat-dms', decToDMS(lat, 'NS'));
+  setText('g-lon', lon.toFixed(6) + '°');
+  setText('g-lon-dms', decToDMS(lon, 'EW'));
+  setText('g-alt', isNaN(alt) ? '--' : alt.toFixed(1));
+  setText('g-fixmode', p(0) === '3' ? '3D' : p(0) === '2' ? '2D' : '--');
+  setText('g-spd', spdKmh.toFixed(1));
+  setText('g-cog', cog.toFixed(1) + '°');
+  setText('g-cog-dir', cogToDir(cog));
+  setText('g-pdop', pdop ? `${parseFloat(pdop).toFixed(1)} (${dopQual(parseFloat(pdop))})` : '--');
+  setText('g-hdop', hdop ? `${parseFloat(hdop).toFixed(1)} (${dopQual(parseFloat(hdop))})` : '--');
+  setText('g-vdop', vdop ? `${parseFloat(vdop).toFixed(1)} (${dopQual(parseFloat(vdop))})` : '--');
+  setText('g-sv-gps', svGps || '--');
+  setText('g-sv-glo', svGlo || '--');
+  setText('g-sv-bds', svBds || '--');
+  setText('g-sv-total', total || '--');
+  setText('g-time', `${p(8).slice(0,2)}/${p(8).slice(2,4)}/20${p(8).slice(4,6)} ${p(9).slice(0,2)}:${p(9).slice(2,4)}:${p(9).slice(4,6)}`);
+
+  lastFixTs = Date.now();
+
+  const ml = document.getElementById('mapLink');
+  ml.href = `https://www.google.com/maps?q=${lat},${lon}`;
+  ml.style.display = 'inline-flex';
+
+  mapUpdate(lat, lon, `Alt ${isNaN(alt)?'--':alt.toFixed(0)} m | ${spdKmh.toFixed(1)} km/h | ${total} sat | HDOP ${hdop}`);
+  setText('map-spd', `🚀 ${spdKmh.toFixed(1)} km/h`);
+  setText('map-sat', `🛰️ ${total} sat`);
+  setText('map-hdop', `HDOP ${hdop || '--'}`);
+
+  renderGnssTable(parts, hasFix);
+}
+
+function renderGnssTable(parts, hasFix) {
+  const tbody = document.getElementById('gnss-field-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  CGNSSINFO_FIELDS.forEach((f, i) => {
+    const raw = (parts[i] || '').trim();
+    const tr = document.createElement('tr');
+    if (i === 4 || i === 6) tr.className = 'f-highlight';
+    else if (i === 0 && !hasFix) tr.className = 'f-err';
+    tr.innerHTML = `<td class="f-idx">${i}</td><td class="f-name">${f.name}</td>`
+                 + `<td class="f-raw">${escHtml(raw)}</td><td class="f-dec">${escHtml(f.decode(raw))}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function parseGnssPwr(line) {
+  if (/READY/i.test(line)) { log('sys', 'GNSS pronto para uso.', 'ok'); return; }
+  const m = line.match(/\+CGNSSPWR:\s*(\d)/);
+  if (!m) return;
+  log('sys', m[1] === '1' ? 'GNSS alimentado.' : 'GNSS desligado.', 'info');
+}
+
+// ── NMEA ──────────────────────────────────────────────────────
+let nmeaSnrAcc = [], nmeaLastGga = 0;
+
+function parseNmea(line) {
+  appendConsole('nmea-console', line, 'Ative o stream NMEA para ver as sentenças brutas.');
+  const body = line.slice(1).split('*')[0];
+  const f = body.split(',');
+  const type = f[0].slice(-3);
+
+  if (type === 'GGA' && f[2] && f[4] && f[6] !== '0') {
+    const lat = nmeaToDeg(f[2]) * (f[3] === 'S' ? -1 : 1);
+    const lon = nmeaToDeg(f[4]) * (f[5] === 'W' ? -1 : 1);
+    const alt = parseFloat(f[9]);
+    if (Date.now() - nmeaLastGga > 900) {
+      nmeaLastGga = Date.now();
+      mapUpdate(lat, lon, `NMEA GGA · Alt ${isNaN(alt) ? '--' : alt.toFixed(0)} m · ${f[7]} sat`);
+      setText('map-coord', `${lat.toFixed(6)}, ${lon.toFixed(6)}`);
+    }
+  }
+
+  if (type === 'GSV') {
+    for (let i = 7; i < f.length; i += 4) {
+      const snr = parseInt(f[i], 10);
+      if (!isNaN(snr) && snr > 0) nmeaSnrAcc.push(snr);
+    }
+    if (nmeaSnrAcc.length > 24) nmeaSnrAcc = nmeaSnrAcc.slice(-24);
+    if (nmeaSnrAcc.length) {
+      const avg = nmeaSnrAcc.reduce((a, b) => a + b, 0) / nmeaSnrAcc.length;
+      setText('g-cn0', avg.toFixed(0));
+    }
+  }
+}
+
+function decToDMS(deg, axis) {
+  const abs = Math.abs(deg), d = Math.floor(abs), m = Math.floor((abs - d) * 60);
+  const s = ((abs - d - m / 60) * 3600).toFixed(2);
+  const dir = axis === 'NS' ? (deg >= 0 ? 'N' : 'S') : (deg >= 0 ? 'E' : 'W');
+  return `${d}°${m}'${s}" ${dir}`;
+}
+
+function cogToDir(deg) {
+  const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+  return dirs[Math.round(deg / 22.5) % 16];
+}
+
+function dopQual(v) {
+  if (v <= 1) return 'Ideal';
+  if (v <= 2) return 'Excelente';
+  if (v <= 5) return 'Bom';
+  if (v <= 10) return 'Moderado';
+  if (v <= 20) return 'Ruim';
+  return 'Péssimo';
+}
+
+// ── Rede ──────────────────────────────────────────────────────
+function setMeter(id, pct, value, goodAt) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const p = Math.max(0, Math.min(100, pct));
+  el.style.width = p + '%';
+  el.style.background = p >= 66 ? 'var(--green)' : p >= 33 ? 'var(--yellow)' : 'var(--red)';
+}
+
+function parseCSQ(line) {
+  const m = line.match(/\+CSQ:\s*(\d+),(\d+)/);
+  if (!m) return;
+  const rssi = parseInt(m[1], 10);
+  const dbm = rssi === 99 ? null : -113 + rssi * 2;
+  setText('n-rssi', rssi === 99 ? '--' : rssi);
+  setText('n-rssi-dbm', dbm === null ? 'desconhecido' : `${dbm} dBm`);
+  setMeter('n-rssi-bar', rssi === 99 ? 0 : (rssi / 31) * 100);
+  const level = rssi === 99 ? 0 : Math.min(5, Math.ceil(rssi / 6));
+  for (let i = 1; i <= 5; i++) document.getElementById(`b${i}`)?.classList.toggle('active', i <= level);
+}
+
+function parseCESQ(line) {
+  const m = line.match(/\+CESQ:\s*(\d+),(\d+),(\d+),(\d+),(\d+),(\d+)/);
+  if (!m) return;
+  const rsrqIdx = parseInt(m[5], 10), rsrpIdx = parseInt(m[6], 10);
+  if (rsrpIdx !== 255) {
+    const rsrp = -140 + rsrpIdx;
+    setText('n-rsrp', rsrp);
+    setMeter('n-rsrp-bar', ((rsrp + 140) / 96) * 100);
+  }
+  if (rsrqIdx !== 255) {
+    const rsrq = -19.5 + rsrqIdx * 0.5;
+    setText('n-rsrq', rsrq.toFixed(1));
+    setMeter('n-rsrq-bar', ((rsrq + 20) / 17) * 100);
+  }
+}
+
+function parseCPSI(line) {
+  appendConsole('net-console', line, 'Aguardando AT+CPSI? / AT+COPS=? ...');
+  const body = line.replace('+CPSI:', '').trim();
+  const f = body.split(',').map(s => s.trim());
+  const tech = f[0] || '--';
+  setText('n-tech', tech + (f[1] ? ` · ${f[1]}` : ''));
+
+  if (/LTE|NR/i.test(tech)) {
+    setText('n-mccmnc', f[2] || 'MCC/MNC');
+    setText('n-tac', f[3] || '--');
+    setText('n-cellid', f[4] || '--');
+    setText('n-pcid', f[5] ? `PCID ${f[5]}` : 'PCID');
+    setText('n-band', (f[6] || '--').replace('EUTRAN-BAND', 'B'));
+    setText('n-earfcn', f[7] ? `EARFCN ${f[7]}` : 'EARFCN');
+
+    // O firmware reporta RSRP/RSRQ/RSSI em décimos de dB (-850 = -85,0). Converte
+    // pelo limite plausível de cada grandeza: RSRQ vai de -3 a -20 dB, RSRP de -44 a -140 dBm.
+    const scale = (v, limit) => { const n = parseFloat(v); return isNaN(n) ? null : (Math.abs(n) > limit ? n / 10 : n); };
+    const rsrq = scale(f[10], 25), rsrp = scale(f[11], 200), sinr = parseFloat(f[13]);
+    if (rsrp !== null) { setText('n-rsrp', rsrp.toFixed(0)); setMeter('n-rsrp-bar', ((rsrp + 140) / 96) * 100); }
+    if (rsrq !== null) { setText('n-rsrq', rsrq.toFixed(1)); setMeter('n-rsrq-bar', ((rsrq + 20) / 17) * 100); }
+    if (!isNaN(sinr))  { setText('n-sinr', sinr.toFixed(0)); setMeter('n-sinr-bar', ((sinr + 10) / 40) * 100); }
+  } else if (/GSM|EDGE|GPRS/i.test(tech)) {
+    setText('n-mccmnc', f[2] || 'MCC/MNC');
+    setText('n-tac', f[3] || '--');
+    setText('n-cellid', f[4] || '--');
+    setText('n-band', f[5] || '--');
+    // O campo seguinte à banda é o nível de recepção (negativo); os demais variam por firmware
+    const rx = f.slice(6).map(parseFloat).find(v => !isNaN(v) && v < 0);
+    const arfcn = f.slice(6).find(v => /^\d+$/.test(v));
+    setText('n-earfcn', arfcn ? `ARFCN ${arfcn}` : 'ARFCN');
+    if (rx !== undefined) { setText('n-rsrp', rx.toFixed(0)); setMeter('n-rsrp-bar', ((rx + 110) / 60) * 100); }
+  }
+}
+
+function parseCxREG(line, targetId, label) {
+  const m = line.match(/\+C(?:E|G)?REG:\s*\d+,(\d+)/);
+  if (!m) return;
+  const codes = { '0':'Não registrado', '1':'Registrado (rede local)', '2':'Buscando rede...', '3':'Registro negado', '4':'Desconhecido', '5':'Registrado (roaming)' };
+  const txt = codes[m[1]] || m[1];
+  if (targetId) setText(targetId, txt);
+  appendConsole('net-console', `${label}: ${txt}  [${line}]`, 'Aguardando AT+CPSI? / AT+COPS=? ...');
+}
+
+function parseCOPS(line) {
+  if (line.includes('(')) { appendConsole('net-console', line, 'Aguardando AT+CPSI? / AT+COPS=? ...'); return; }
+  const m = line.match(/\+COPS:.*?"(.+?)"/);
+  if (m) setText('n-oper', m[1]);
+  const act = line.trim().split(',').pop();
+  const acts = { '0':'GSM','1':'GSM Compact','2':'UTRAN','3':'GSM/EGPRS','7':'E-UTRAN (LTE)','13':'E-UTRAN NB-S1' };
+  if (acts[act]) setText('n-tech', acts[act]);
+}
+
+function parseCNSMOD(line) {
+  const m = line.match(/\+CNSMOD:\s*\d+,(\d+)/);
+  if (!m) return;
+  const modes = { '0':'Sem serviço','1':'GSM','2':'GPRS','3':'EGPRS (EDGE)','4':'WCDMA','5':'HSDPA','6':'HSUPA','7':'HSPA','8':'LTE','9':'TDS-CDMA' };
+  setText('n-tech', modes[m[1]] || m[1]);
+}
+
+function parseIpAddr(line) {
+  const m = line.match(/"?(\d{1,3}(?:\.\d{1,3}){3})"?/);
+  if (!m) return;
+  setText('n-ip', m[1]);
+  setText('tcp-ip', m[1]);
+}
+
+// ── HTTP ──────────────────────────────────────────────────────
+function parseHTTPACTION(line) {
+  const m = line.match(/\+HTTPACTION:\s*(\d),(\d+),(\d+)/);
+  if (!m) return;
+  const method = ({ '0':'GET','1':'POST','2':'HEAD','3':'DELETE' }[m[1]] || m[1]);
+  httpExpectedLen = parseInt(m[3], 10);
+  setText('http-method', method);
+  setText('http-status', m[2]);
+  setText('http-bytes', m[3]);
+  setText('http-state', 'Resposta pronta');
+  log('sys', `HTTP ${method}: status ${m[2]}, ${m[3]} bytes`, m[2] === '200' ? 'ok' : 'err');
+}
+
+function parseHTTPREAD(line) {
+  const m = line.match(/\+HTTPREAD:\s*(\d+)/);
+  if (!m) return;
+  const n = parseInt(m[1], 10);
+  if (n === 0) { httpReadPending = false; setText('http-state', 'Concluído'); return; }
+  setText('http-bytes', n);
+  setText('http-state', 'Lendo payload');
+  setHttpResponse('');
+  httpReadPending = true;
+}
+
+function setHttpResponse(t) { const b = document.getElementById('http-response'); if (b) b.textContent = t || 'Aguardando HTTPREAD...'; }
+function appendHttpResponse(t) {
+  const b = document.getElementById('http-response');
+  if (!b) return;
+  if (b.textContent === 'Aguardando HTTPREAD...') b.textContent = '';
+  b.textContent += (b.textContent ? '\n' : '') + t;
+  b.scrollTop = b.scrollHeight;
+}
+
+// ── MQTT ──────────────────────────────────────────────────────
+function parseMqtt(line) {
+  appendConsole('mqtt-console', line, 'Aguardando eventos MQTT...');
+  if (line.startsWith('+CMQTTSTART:')) setText('mq-svc', line.trim().endsWith('0') ? 'Ativo' : 'Falha');
+  if (line.startsWith('+CMQTTSTOP:'))  { setText('mq-svc', 'Parado'); setText('mq-conn', 'Desconectado'); }
+  if (line.startsWith('+CMQTTCONNECT:')) {
+    const ok = /,0$/.test(line.trim());
+    setText('mq-conn', ok ? 'Conectado' : 'Falha na conexão');
+    setText('mq-client', document.getElementById('mqttClientId').value || '--');
+  }
+  if (line.startsWith('+CMQTTDISC:'))  setText('mq-conn', 'Desconectado');
+  if (line.startsWith('+CMQTTCONNLOST:')) { setText('mq-conn', 'Conexão perdida'); log('sys', 'MQTT: conexão perdida.', 'err'); }
+  if (line.startsWith('+CMQTTRXSTART:')) mqttRxState = { stage: null, topic: '', payload: '' };
+  if (line.startsWith('+CMQTTRXTOPIC:') && mqttRxState) mqttRxState.stage = 'topic';
+  if (line.startsWith('+CMQTTRXPAYLOAD:') && mqttRxState) mqttRxState.stage = 'payload';
+  if (line.startsWith('+CMQTTRXEND:') && mqttRxState) {
+    mqttRxCount++;
+    setText('mq-rx', mqttRxCount);
+    appendConsole('mqtt-console', `📥 ${mqttRxState.topic} → ${mqttRxState.payload}`, 'Aguardando eventos MQTT...');
+    mqttRxState = null;
+  }
+}
+
+function parseMqttBody(line) {
+  if (!mqttRxState || !mqttRxState.stage) return;
+  if (mqttRxState.stage === 'topic') { mqttRxState.topic = line; mqttRxState.stage = null; }
+  else if (mqttRxState.stage === 'payload') { mqttRxState.payload = line; mqttRxState.stage = null; }
+}
+
+// ── TCP/IP ────────────────────────────────────────────────────
+function parseCipOpen(line) {
+  appendConsole('tcp-console', line, 'Aguardando dados...');
+  const m = line.match(/\+CIPOPEN:\s*(\d+),(\d+)/);
+  if (m) setText('tcp-sock', m[2] === '0' ? `Link ${m[1]} aberto` : `Erro ${m[2]}`);
+}
+
+function parseTcpData(line) {
+  appendConsole('tcp-console', line, 'Aguardando dados...');
+  const m = line.match(/^\+IPD(\d+)/);
+  if (m) { tcpRxBytes += parseInt(m[1], 10); setText('tcp-rxbytes', tcpRxBytes); }
+}
+
+// ── Voz ───────────────────────────────────────────────────────
+function parseVoice(line) {
+  appendConsole('voz-console', line, 'Aguardando eventos de chamada...');
+  if (line === 'RING') { setText('v-state', 'Chamada entrando'); startCallTimer(); }
+  if (line.startsWith('+CLIP:')) {
+    const m = line.match(/"([^"]+)"/);
+    if (m) setText('v-number', m[1]);
+  }
+  if (line.startsWith('+CLCC:')) {
+    const f = line.replace('+CLCC:', '').split(',');
+    const stat = { '0':'Ativa','1':'Em espera','2':'Discando','3':'Chamando','4':'Recebendo','5':'Aguardando' }[(f[2]||'').trim()];
+    setText('v-state', stat || 'Em curso');
+    const num = (line.match(/"([^"]+)"/) || [])[1];
+    if (num) setText('v-number', num);
+    startCallTimer();
+  }
+  if (line === 'NO CARRIER' || line === 'BUSY' || line === 'NO ANSWER') {
+    setText('v-state', line === 'BUSY' ? 'Ocupado' : 'Ociosa');
+    stopCallTimer();
+  }
+}
+
+let callStart = 0;
+function startCallTimer() {
+  if (callTimer) return;
+  callStart = Date.now();
+  callTimer = setInterval(() => {
+    const s = Math.floor((Date.now() - callStart) / 1000);
+    setText('v-dur', `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`);
+  }, 500);
+}
+function stopCallTimer() {
+  if (callTimer) { clearInterval(callTimer); callTimer = null; }
+  setText('v-dur', '00:00');
+}
+
+// ── Hardware ──────────────────────────────────────────────────
+function parseCBC(line) {
+  let v = null;
+  let m = line.match(/\+CBC:\s*([\d.]+)\s*V/i);
+  if (m) v = parseFloat(m[1]);
+  else {
+    m = line.match(/\+CBC:\s*\d+,\d+,(\d+)/);
+    if (m) v = parseInt(m[1], 10) / 1000;
+  }
+  if (v === null) return;
+  setText('hw-vbat', v.toFixed(2));
+  appendConsole('hw-console', `Alimentação: ${v.toFixed(3)} V`, 'Aguardando leituras...');
+}
+
+function parseTemp(line) {
+  const m = line.match(/\+CPMUTEMP:\s*(-?\d+)/);
+  if (!m) return;
+  setText('hw-temp', m[1]);
+  appendConsole('hw-console', `Temperatura: ${m[1]} °C`, 'Aguardando leituras...');
+}
+
+function parseAdc(line) {
+  const m = line.match(/\+CADC:\s*\d+,\s*(\d+)/) || line.match(/\+CADC:\s*(\d+)/);
+  if (!m) return;
+  setText('hw-adc', m[1]);
+  appendConsole('hw-console', `ADC: ${m[1]} mV`, 'Aguardando leituras...');
+}
+
+function parseClock(line) {
+  const m = line.match(/\+CCLK:\s*"([^"]+)"/);
+  if (!m) return;
+  setText('hw-clock', m[1]);
+  appendConsole('hw-console', `Relógio: ${m[1]}`, 'Aguardando leituras...');
+}
+
+// ── Identificação ─────────────────────────────────────────────
+function parseIdentity(line) {
+  const set = (k, v, id) => { identity[k] = v; setText(id, v); };
+  if (/^Manufacturer:/i.test(line)) { set('manu', line.split(':')[1].trim(), 'i-manu'); appendConsole('info-console', line, 'Clique em "Ler identificação".'); return; }
+  if (/^Model:/i.test(line))        { set('model', line.split(':')[1].trim(), 'i-model'); appendConsole('info-console', line, 'Clique em "Ler identificação".'); return; }
+  if (/^Revision:/i.test(line))     { set('fw', line.split(':').slice(1).join(':').trim(), 'i-fw'); appendConsole('info-console', line, 'Clique em "Ler identificação".'); return; }
+  if (/^IMEI:/i.test(line))         { set('imei', line.split(':')[1].trim(), 'i-imei'); return; }
+  if (/^\+ICCID:/i.test(line))      { set('iccid', line.split(':')[1].trim(), 'i-iccid'); return; }
+  if (/^\+CGMR:/i.test(line))       { set('fw', line.split(':').slice(1).join(':').trim(), 'i-fw'); return; }
+  if (/^\+CNUM:/i.test(line))       { const m = line.match(/"[^"]*","([^"]+)"/); if (m) set('num', m[1], 'i-num'); return; }
+  // Resposta do ATI: linha solta com o modelo. A linha de build do SIMCOMATI
+  // ("A7672M7_F,V1.04") também casa com o padrão, por isso o filtro de vírgula.
+  if (/^A7\d{3}/i.test(line) && !line.includes(',')) { set('model', line.trim(), 'i-model'); return; }
+
+  // Resposta "crua" (só dígitos) de AT+CGSN / AT+CIMI: a atribuição pelo último
+  // comando só é confiável quando não há polling concorrente, por isso o
+  // readIdentity() usa queryValue() e este caminho é apenas para uso manual.
+  if (/^\d{14,16}$/.test(line)) {
+    if (lastCmd === 'AT+CGSN') set('imei', line, 'i-imei');
+    else if (lastCmd === 'AT+CIMI' && line !== identity.imei) set('imsi', line, 'i-imsi');
+    return;
+  }
+  if (/^(SMS DONE|PB DONE|START|RDY)$/.test(line)) log('sys', `Módulo: ${line}`, 'info');
+}
+
+// ============================================================
+// AÇÕES — sequências e formulários
+// ============================================================
+async function runInitSequence() {
+  if (!requireConnection('sequência de inicialização')) return;
+  log('sys', '⏳ Sequência de inicialização A7672SA...', 'info');
+  const seq = ['AT', 'ATE1', 'AT+CMEE=2', 'AT+CPIN?', 'AT+CGMR', 'AT+CGSN', 'AT+CICCID',
+               'AT+CFUN?', 'AT+CSQ', 'AT+CPSI?', 'AT+CEREG?', 'AT+CGATT?', 'AT+CGDCONT?'];
+  for (const c of seq) { await sendWait(c, 6000); await delay(80); }
+  log('sys', '✅ Inicialização concluída.', 'ok');
+}
+
+function scanOperators() {
+  log('sys', 'Buscando operadoras — pode levar até 60 s...', 'info');
+  send('AT+COPS=?');
+}
+
+async function refreshNetwork() {
+  for (const c of ['AT+CSQ', 'AT+CESQ', 'AT+CPSI?', 'AT+CEREG?', 'AT+COPS?', 'AT+CGATT?', 'AT+CGPADDR']) {
+    await sendWait(c, 5000); await delay(60);
+  }
+}
+
+async function applyApnFromPanel() {
+  const apn = (document.getElementById('apnInput').value || '').trim();
+  if (!apn) { alert('Informe o APN da operadora.'); return; }
+  const user = (document.getElementById('apnUser').value || '').trim();
+  const pass = (document.getElementById('apnPass').value || '').trim();
+  await sendWait(`AT+CGDCONT=1,"IP","${apn}"`);
+  if (user || pass) await sendWait(`AT+CGAUTH=1,1,"${user}","${pass}"`);
+  await sendWait('AT+CGATT=1', 10000);
+  log('sys', `APN configurado: ${apn}`, 'ok');
+}
+
+function applyCnmp() { send(`AT+CNMP=${document.getElementById('cnmpSel').value}`); }
+
+function toggleAutoNetwork() {
+  const btn = document.getElementById('autoNetBtn');
+  if (autoNetTimer) {
+    clearInterval(autoNetTimer); autoNetTimer = null;
+    btn.textContent = '⚡ Auto 10s';
+    log('sys', 'Atualização automática de rede desativada.', 'info');
+  } else {
+    autoNetTimer = setInterval(() => { send('AT+CSQ'); setTimeout(() => send('AT+CPSI?'), 700); }, 10000);
+    btn.textContent = '⏸ Auto ON';
+    send('AT+CSQ');
+  }
+}
+
+// ── GNSS ──────────────────────────────────────────────────────
+async function gnssOn() {
+  if (!requireConnection('ligar GNSS')) return;
+
+  // O waiter da URC é registrado ANTES do envio: '+CGNSSPWR: READY!' pode chegar
+  // no mesmo chunk serial do 'OK', e aí não haveria tempo de registrá-lo depois.
+  const ready = waitFor(l => l.startsWith('+CGNSSPWR: READY'), 20000);
+
+  const res = await sendWait('AT+CGNSSPWR=1', 12000);
+  if (res && /ERROR/.test(res)) {
+    log('sys', `AT+CGNSSPWR=1 falhou (${res}) — variante sem receptor GNSS?`, 'err');
+    return;
+  }
+
+  // Configurar constelações antes do READY faz o módulo devolver ERROR.
+  const gotReady = await ready;
+  if (!gotReady) log('sys', 'Sem +CGNSSPWR: READY! em 20 s — o receptor pode não ter iniciado.', 'err');
+
+  const mode = document.getElementById('gnssModeSel')?.value;
+  if (mode) {
+    const r = await sendWait(`AT+CGNSSMODE=${mode}`);
+    if (r && /ERROR/.test(r)) log('sys', `AT+CGNSSMODE=${mode} recusado (${r}).`, 'err');
+  }
+
+  log('sys', 'GNSS ligado. Aguardando fix (30–90 s a frio).', 'info');
+  setTimeout(() => send('AT+CGNSSINFO'), 1500);
+}
+
+function gnssOff() {
+  if (gnssPollTimer) { clearInterval(gnssPollTimer); gnssPollTimer = null; document.getElementById('gnssPollBtn').textContent = 'ON'; }
+  send('AT+CGNSSPWR=0');
+}
+
+function applyGnssMode() { send(`AT+CGNSSMODE=${document.getElementById('gnssModeSel').value}`); }
+
+async function nmeaStart() {
+  if (!requireConnection('stream NMEA')) return;
+  nmeaStreaming = true;
+  setGnssView('nmea');
+  // Sem o PORTSWITCH o NMEA sai pela porta dedicada e nunca aparece aqui.
+  await sendWait('AT+CGNSSPORTSWITCH=0,1');
+  await sendWait('AT+CGNSSNMEA=1,1,1,1,1,0,0,0');
+  await sendWait('AT+CGPSNMEARATE=1');
+  const r = await sendWait('AT+CGNSSTST=1');
+  if (r && /ERROR/.test(r)) {
+    nmeaStreaming = false;
+    log('sys', `AT+CGNSSTST=1 falhou (${r}) — ligue o GNSS antes.`, 'err');
+    return;
+  }
+  log('sys', 'Stream NMEA ativo na porta AT. Veja os $GPGSV para satélites em vista.', 'info');
+}
+
+function nmeaStop() { nmeaStreaming = false; send('AT+CGNSSTST=0'); }
+
+function toggleGnssPoll() {
+  const btn = document.getElementById('gnssPollBtn');
+  if (gnssPollTimer) {
+    clearInterval(gnssPollTimer); gnssPollTimer = null;
+    btn.textContent = 'ON';
+    log('sys', 'Poll de GNSS desativado.', 'info');
+  } else {
+    const s = parseInt(document.getElementById('gnssPollInterval').value, 10) || 2;
+    gnssPollTimer = setInterval(() => send('AT+CGNSSINFO'), s * 1000);
+    btn.textContent = 'OFF';
+    send('AT+CGNSSINFO');
+    log('sys', `Poll de GNSS a cada ${s}s.`, 'info');
+  }
+}
+
+function setGnssView(view) {
+  const map = { decoded: 'gnss-view-decoded', raw: 'gnss-view-raw', nmea: 'gnss-view-nmea' };
+  Object.entries(map).forEach(([k, id]) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = k === view ? (k === 'nmea' ? 'flex' : 'block') : 'none';
+  });
+  ['viewDecoded','viewRaw','viewNmea'].forEach(id => document.getElementById(id)?.classList.remove('active'));
+  document.getElementById({ decoded:'viewDecoded', raw:'viewRaw', nmea:'viewNmea' }[view])?.classList.add('active');
+}
+
+// ── SMS ───────────────────────────────────────────────────────
+function toUcs2Hex(str) {
+  let out = '';
+  for (const ch of str) {
+    const cp = ch.codePointAt(0);
+    if (cp > 0xFFFF) {
+      const h = Math.floor((cp - 0x10000) / 0x400) + 0xD800;
+      const l = ((cp - 0x10000) % 0x400) + 0xDC00;
+      out += h.toString(16).padStart(4,'0') + l.toString(16).padStart(4,'0');
+    } else out += cp.toString(16).padStart(4,'0');
+  }
+  return out.toUpperCase();
+}
+
+function updateSmsCounter() {
+  const msg = document.getElementById('smsMsg').value;
+  const ucs2 = document.getElementById('smsCharset').value === 'UCS2';
+  const max = ucs2 ? 70 : 160;
+  const el = document.getElementById('smsCounter');
+  el.textContent = `${msg.length} / ${max}${msg.length > max ? ` (${Math.ceil(msg.length / (ucs2?67:153))} partes)` : ''}`;
+  el.className = 'pill' + (msg.length > max ? ' err' : '');
+}
+
+async function smsInit() {
+  await sendWait('AT+CMGF=1');
+  await sendWait('AT+CSCS="GSM"');
+  await sendWait('AT+CPMS="SM","SM","SM"');
+  await sendWait('AT+CNMI=2,1,0,0,0');
+  log('sys', 'SMS configurado (texto, memória SIM, URC ativo).', 'ok');
+}
+
+async function sendSMS() {
+  const num = document.getElementById('smsNumber').value.trim();
+  let msg = document.getElementById('smsMsg').value;
+  const ucs2 = document.getElementById('smsCharset').value === 'UCS2';
+  if (!num || !msg) { alert('Preencha número e mensagem.'); return; }
+
+  await sendWait('AT+CMGF=1');
+  await sendWait(`AT+CSCS="${ucs2 ? 'UCS2' : 'GSM'}"`);
+
+  const dest = ucs2 ? toUcs2Hex(num) : num;
+  const body = ucs2 ? toUcs2Hex(msg) : msg;
+
+  const prompt = waitPrompt(6000);
+  await send(`AT+CMGS="${dest}"`);
+  const got = await prompt;
+  if (!got && connected) { log('sys', 'Módulo não retornou o prompt ">" — SMS abortado.', 'err'); await writeRaw('\x1B'); return; }
+  await delay(120);
+  await sendData(body, '\x1A');
+  const res = await waitOk(45000);
+  log('sys', res === 'OK' ? 'SMS enviado.' : `Falha no envio: ${res || 'timeout'}`, res === 'OK' ? 'ok' : 'err');
+}
+
+function promptReadSms() {
+  const i = prompt('Índice da mensagem:', '1');
+  if (i) send(`AT+CMGR=${parseInt(i, 10)}`);
+}
+
+function confirmDeleteAllSms() {
+  if (confirm('Apagar TODAS as mensagens da memória?')) send('AT+CMGD=,4');
+}
+
+// ── Voz ───────────────────────────────────────────────────────
+function promptCall() {
+  const num = prompt('Número para ligar:', '+5511999999999');
+  if (num) send(`ATD${num};`);
+}
+
+function dialFromPanel() {
+  const n = document.getElementById('callNumber').value.trim();
+  if (!n) { alert('Informe o número.'); return; }
+  send(`ATD${n};`);
+  setText('v-number', n);
+  setText('v-state', 'Discando');
+}
+
+function applyVolume() { send(`AT+CLVL=${document.getElementById('volRange').value}`); }
+function applyAudioDevice() { send(`AT+CSDVC=${document.getElementById('audioDevSel').value}`); }
+
+function buildDtmfPad() {
+  const pad = document.getElementById('dtmfPad');
+  if (!pad) return;
+  '123456789*0#'.split('').forEach(k => {
+    const b = document.createElement('button');
+    b.className = 'action-btn secondary';
+    b.style.minWidth = '52px';
+    b.textContent = k;
+    b.onclick = () => send(`AT+VTS="${k}"`);
+    pad.appendChild(b);
+  });
+}
+
+// ── HTTP ──────────────────────────────────────────────────────
+const byteLen = s => new TextEncoder().encode(s).length;
+
+function httpInit() {
+  send('AT+HTTPINIT');
+  setText('http-state', 'Inicializado');
+}
+
+function promptHttpURL() {
+  const cur = document.getElementById('httpUrlInput').value || 'https://httpbin.org/get';
+  const url = prompt('URL:', cur);
+  if (!url) return;
+  document.getElementById('httpUrlInput').value = url;
+  httpSetURLFromInput();
+}
+
+function httpSetURLFromInput() {
+  const url = document.getElementById('httpUrlInput').value.trim();
+  if (!url) { alert('Informe a URL.'); return; }
+  send(`AT+HTTPPARA="URL","${url.replace(/"/g, '%22')}"`);
+}
+
+function httpAction(method) {
+  send(`AT+HTTPACTION=${method}`);
+  setText('http-method', ({0:'GET',1:'POST',2:'HEAD',3:'DELETE'})[method] || method);
+  setText('http-state', 'Executando');
+}
+
+function httpReadAll() {
+  const n = httpExpectedLen || 4096;
+  send(`AT+HTTPREAD=0,${n}`);
+}
+
+async function httpRequest() {
+  const url = document.getElementById('httpUrlInput').value.trim();
+  if (!url) { alert('Informe a URL.'); return; }
+  const method = parseInt(document.getElementById('httpMethodInput').value, 10);
+  const ctype = document.getElementById('httpContentType').value.trim();
+  const body = document.getElementById('httpBody').value;
+  const ssl = document.getElementById('httpSslChk').checked || /^https:/i.test(url);
+
+  setText('http-state', 'Executando');
+  setHttpResponse('');
+
+  await sendWait('AT+HTTPTERM', 3000);
+  await sendWait('AT+HTTPINIT', 6000);
+  await sendWait(`AT+HTTPPARA="URL","${url.replace(/"/g,'%22')}"`);
+  if (ssl) {
+    await sendWait('AT+CSSLCFG="sslversion",0,4');
+    await sendWait('AT+CSSLCFG="authmode",0,0');
+    await sendWait('AT+HTTPPARA="SSLCFG",0');
+  }
+  if (method === 1) {
+    if (ctype) await sendWait(`AT+HTTPPARA="CONTENT","${ctype}"`);
+    if (body) {
+      const p = waitFor(l => l.startsWith('DOWNLOAD') || l.startsWith('>'), 6000);
+      await send(`AT+HTTPDATA=${byteLen(body)},10000`);
+      if (await p) { await sendData(body, ''); await waitOk(12000); }
+      else log('sys', 'Módulo não aceitou HTTPDATA.', 'err');
+    }
+  }
+
+  const act = waitFor(l => l.startsWith('+HTTPACTION:'), 60000);
+  await send(`AT+HTTPACTION=${method}`);
+  const res = await act;
+  if (!res) { log('sys', 'Timeout aguardando +HTTPACTION.', 'err'); setText('http-state', 'Timeout'); return; }
+  await delay(200);
+  httpReadAll();
+}
+
+// ── MQTT ──────────────────────────────────────────────────────
+function mqttAcquire() {
+  const id = document.getElementById('mqttClientId').value.trim() || 'a7672sa';
+  const ssl = /^ssl:|^mqtts:/i.test(document.getElementById('mqttHost').value.trim()) ? 1 : 0;
+  send(`AT+CMQTTACCQ=0,"${id}",${ssl}`);
+}
+
+function mqttConnect() {
+  const host = document.getElementById('mqttHost').value.trim();
+  const ka = parseInt(document.getElementById('mqttKeepalive').value, 10) || 60;
+  const u = document.getElementById('mqttUser').value.trim();
+  const p = document.getElementById('mqttPass').value.trim();
+  const auth = (u || p) ? `,"${u}","${p}"` : '';
+  send(`AT+CMQTTCONNECT=0,"${host}",${ka},1${auth}`);
+}
+
+async function mqttFullConnect() {
+  const ssl = /^ssl:|^mqtts:/i.test(document.getElementById('mqttHost').value.trim());
+  await sendWait('AT+CMQTTSTART', 15000);
+  await delay(300);
+  mqttAcquire();
+  await waitOk(6000);
+  if (ssl) {
+    await sendWait('AT+CSSLCFG="sslversion",0,4');
+    await sendWait('AT+CSSLCFG="authmode",0,0');
+    await sendWait('AT+CMQTTSSLCFG=0,0');
+  }
+  const conn = waitFor(l => l.startsWith('+CMQTTCONNECT:'), 30000);
+  mqttConnect();
+  const r = await conn;
+  log('sys', r && /,0$/.test(r.trim()) ? 'MQTT conectado.' : `MQTT falhou: ${r || 'timeout'}`, r && /,0$/.test(r.trim()) ? 'ok' : 'err');
+}
+
+async function mqttPublish(topicOverride, payloadOverride) {
+  const topic = (topicOverride ?? document.getElementById('mqttTopic').value).trim();
+  const payload = payloadOverride ?? document.getElementById('mqttPayload').value;
+  const qos = document.getElementById('mqttQos').value;
+  if (!topic) { alert('Informe o tópico.'); return; }
+
+  let p = waitPrompt(6000);
+  await send(`AT+CMQTTTOPIC=0,${byteLen(topic)}`);
+  if (!(await p) && connected) { log('sys', 'Sem prompt para o tópico.', 'err'); return; }
+  await sendData(topic, '');
+  await waitOk(5000);
+
+  p = waitPrompt(6000);
+  await send(`AT+CMQTTPAYLOAD=0,${byteLen(payload)}`);
+  if (!(await p) && connected) { log('sys', 'Sem prompt para o payload.', 'err'); return; }
+  await sendData(payload, '');
+  await waitOk(5000);
+
+  const pub = waitFor(l => l.startsWith('+CMQTTPUB:'), 20000);
+  await send(`AT+CMQTTPUB=0,${qos},60`);
+  const r = await pub;
+  appendConsole('mqtt-console', `📤 ${topic} → ${payload}  [${r || 'timeout'}]`, 'Aguardando eventos MQTT...');
+}
+
+function mqttPublishGnss() {
+  const lat = document.getElementById('g-lat').textContent.replace('°','');
+  const lon = document.getElementById('g-lon').textContent.replace('°','');
+  const spd = document.getElementById('g-spd').textContent;
+  const rssi = document.getElementById('n-rssi').textContent;
+  if (lat === '--') { alert('Sem posição GNSS ainda.'); return; }
+  mqttPublish(undefined, JSON.stringify({ lat: parseFloat(lat), lon: parseFloat(lon), kmh: parseFloat(spd) || 0, rssi: parseInt(rssi, 10) || null, ts: new Date().toISOString() }));
+}
+
+async function mqttSubscribe() {
+  const topic = document.getElementById('mqttTopic').value.trim();
+  const qos = document.getElementById('mqttQos').value;
+  if (!topic) { alert('Informe o tópico.'); return; }
+  const p = waitPrompt(6000);
+  await send(`AT+CMQTTSUB=0,${byteLen(topic)},${qos}`);
+  if (!(await p) && connected) { log('sys', 'Sem prompt para assinatura.', 'err'); return; }
+  await sendData(topic, '');
+  appendConsole('mqtt-console', `Assinando ${topic} (QoS ${qos})`, 'Aguardando eventos MQTT...');
+}
+
+async function mqttUnsubscribe() {
+  const topic = document.getElementById('mqttTopic').value.trim();
+  const p = waitPrompt(6000);
+  await send(`AT+CMQTTUNSUB=0,${byteLen(topic)},0`);
+  if (await p) await sendData(topic, '');
+}
+
+async function mqttDisconnect() {
+  await sendWait('AT+CMQTTDISC=0,120', 15000);
+  await sendWait('AT+CMQTTREL=0');
+  await sendWait('AT+CMQTTSTOP', 10000);
+}
+
+// ── TCP/IP ────────────────────────────────────────────────────
+async function tcpOpenFlow() {
+  const link = document.getElementById('tcpLink').value;
+  const proto = document.getElementById('tcpProto').value;
+  const host = document.getElementById('tcpHost').value.trim();
+  const port = document.getElementById('tcpPort').value;
+  if (!host || !port) { alert('Informe host e porta.'); return; }
+
+  await sendWait('AT+NETOPEN', 20000);
+  await delay(300);
+  const op = waitFor(l => l.startsWith('+CIPOPEN:'), 30000);
+  await send(`AT+CIPOPEN=${link},"${proto}","${host}",${port}`);
+  const r = await op;
+  log('sys', r && /,0$/.test(r.trim()) ? `Socket ${link} aberto em ${host}:${port}` : `Falha ao abrir socket: ${r || 'timeout'}`,
+      r && /,0$/.test(r.trim()) ? 'ok' : 'err');
+}
+
+async function tcpSend() {
+  const link = document.getElementById('tcpLink').value;
+  const data = document.getElementById('tcpData').value;
+  if (!data) { alert('Informe os dados.'); return; }
+  const p = waitPrompt(6000);
+  await send(`AT+CIPSEND=${link},${byteLen(data)}`);
+  if (!(await p) && connected) { log('sys', 'Sem prompt do CIPSEND.', 'err'); return; }
+  await sendData(data, '');
+  appendConsole('tcp-console', `TX: ${data.trim()}`, 'Aguardando dados...');
+}
+
+function tcpClose() { send(`AT+CIPCLOSE=${document.getElementById('tcpLink').value}`); }
+
+function pingHost() {
+  const h = prompt('Host para ping:', '8.8.8.8');
+  if (h) send(`AT+CPING="${h}",1,4,64,1000,10000,255`);
+}
+
+// ── Arquivos / SSL ────────────────────────────────────────────
+function fsChangeDir() { send(`AT+FSCD=${document.getElementById('fsDir').value}`); }
+
+function fsDelete() {
+  const n = document.getElementById('fsName').value.trim();
+  if (!n) { alert('Informe o nome do arquivo.'); return; }
+  if (confirm(`Apagar ${n} do módulo?`)) send(`AT+FSDEL=${n}`);
+}
+
+async function certUpload() {
+  const name = document.getElementById('fsName').value.trim();
+  const body = document.getElementById('certBody').value;
+  if (!name || !body.trim()) { alert('Informe nome do arquivo e conteúdo PEM.'); return; }
+  const p = waitPrompt(8000);
+  await send(`AT+CCERTDOWN="${name}",${byteLen(body)}`);
+  if (!(await p) && connected) { log('sys', 'Módulo não abriu o prompt de download.', 'err'); return; }
+  await sendData(body, '');
+  const r = await waitOk(15000);
+  log('sys', r === 'OK' ? `Certificado ${name} gravado.` : `Falha: ${r || 'timeout'}`, r === 'OK' ? 'ok' : 'err');
+}
+
+function certDelete() {
+  const n = document.getElementById('fsName').value.trim();
+  if (!n) { alert('Informe o nome do certificado.'); return; }
+  if (confirm(`Apagar certificado ${n}?`)) send(`AT+CCERTDELE="${n}"`);
+}
+
+async function sslApply() {
+  const ctx = document.getElementById('sslCtx').value;
+  await sendWait(`AT+CSSLCFG="sslversion",${ctx},${document.getElementById('sslVer').value}`);
+  await sendWait(`AT+CSSLCFG="authmode",${ctx},${document.getElementById('sslAuth').value}`);
+  log('sys', `Contexto SSL ${ctx} configurado.`, 'ok');
+}
+
+function sslBindCa() {
+  const ctx = document.getElementById('sslCtx').value;
+  const n = document.getElementById('fsName').value.trim();
+  if (!n) { alert('Informe o nome do certificado CA.'); return; }
+  send(`AT+CSSLCFG="cacert",${ctx},"${n}"`);
+}
+
+// ── Hardware ──────────────────────────────────────────────────
+function gpioSetDir() { send(`AT+CGDRT=${document.getElementById('gpioNum').value},${document.getElementById('gpioDir').value}`); }
+function gpioWrite()  { send(`AT+CGSETV=${document.getElementById('gpioNum').value},${document.getElementById('gpioVal').value}`); }
+function gpioRead()   { send(`AT+CGGETV=${document.getElementById('gpioNum').value}`); }
+
+function buildCclkStr(d) {
+  const off = -d.getTimezoneOffset();
+  const sign = off >= 0 ? '+' : '-';
+  const zones = Math.floor(Math.abs(off) / 15);
+  const p2 = n => String(n).padStart(2, '0');
+  return `AT+CCLK="${String(d.getFullYear()).slice(-2)}/${p2(d.getMonth()+1)}/${p2(d.getDate())},`
+       + `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}${sign}${p2(zones)}"`;
+}
+
+function syncClock() {
+  const cmd = buildCclkStr(new Date());
+  send(cmd);
+  log('sys', `Relógio sincronizado com o PC → ${cmd}`, 'info');
+}
+
+async function ntpSync() {
+  const srv = document.getElementById('ntpServer')?.value.trim() || 'pool.ntp.org';
+  const zone = document.getElementById('ntpZone')?.value || '-12';
+  await sendWait(`AT+CNTP="${srv}",${zone}`);
+  await sendWait('AT+CNTP', 20000);
+  setTimeout(() => send('AT+CCLK?'), 1200);
+}
+
+function toggleAutoHw() {
+  const btn = document.getElementById('autoHwBtn');
+  if (autoHwTimer) {
+    clearInterval(autoHwTimer); autoHwTimer = null; btn.textContent = '⚡ Auto 15s';
+  } else {
+    autoHwTimer = setInterval(async () => {
+      await sendWait('AT+CBC', 4000);
+      await sendWait('AT+CPMUTEMP', 4000);
+    }, 15000);
+    btn.textContent = '⏸ Auto ON';
+    send('AT+CBC');
+  }
+}
+
+function confirmReset()    { if (confirm('Resetar o módulo A7672SA?')) send('AT+CRESET'); }
+function confirmPowerOff() { if (confirm('Desligar o módulo? Será necessário pulsar o PWRKEY para religar.')) send('AT+CPOF'); }
+
+// ── Info ──────────────────────────────────────────────────────
+async function readIdentity() {
+  await sendWait('AT+SIMCOMATI', 8000);
+  await delay(80);
+
+  const imei = await queryValue('AT+CGSN', l => /^\d{15}$/.test(l));
+  if (imei) { identity.imei = imei; setText('i-imei', imei); }
+  await waitOk(3000);
+
+  const imsi = await queryValue('AT+CIMI', l => /^\d{14,15}$/.test(l) && l !== identity.imei);
+  if (imsi) { identity.imsi = imsi; setText('i-imsi', imsi); }
+  await waitOk(3000);
+
+  for (const c of ['AT+CICCID', 'AT+CNUM', 'AT+CGMR']) { await sendWait(c, 6000); await delay(80); }
+}
+
+function copyDiagnostics() {
+  const g = id => document.getElementById(id)?.textContent || '--';
+  const txt = [
+    '=== A7672SA — diagnóstico ===',
+    `Modelo: ${g('i-model')}  Fabricante: ${g('i-manu')}`,
+    `Firmware: ${g('i-fw')}`,
+    `IMEI: ${g('i-imei')}  IMSI: ${g('i-imsi')}  ICCID: ${g('i-iccid')}`,
+    `Operadora: ${g('n-oper')}  Tecnologia: ${g('n-tech')}  Banda: ${g('n-band')}`,
+    `RSSI: ${g('n-rssi')}  RSRP: ${g('n-rsrp')} dBm  RSRQ: ${g('n-rsrq')} dB  SINR: ${g('n-sinr')} dB`,
+    `Registro: ${g('n-cereg')}  PS: ${g('n-cgatt')}  IP: ${g('n-ip')}`,
+    `GNSS: ${g('g-lat')}, ${g('g-lon')} · ${g('g-sv-total')} sat · HDOP ${g('g-hdop')}`,
+    `Alimentação: ${g('hw-vbat')} V  Temp: ${g('hw-temp')} °C`,
+    `Gerado em ${new Date().toLocaleString('pt-BR')}`
+  ].join('\n');
+  navigator.clipboard?.writeText(txt)
+    .then(() => log('sys', 'Diagnóstico copiado para a área de transferência.', 'ok'))
+    .catch(() => { appendConsole('info-console', txt, 'Clique em "Ler identificação".'); });
+  appendConsole('info-console', txt, 'Clique em "Ler identificação".');
+}
+
+const FEATURES = [
+  ['LTE Cat.1 bis', 'B1/B2/B3/B5/B7/B8/B28 · até 10 Mbps DL / 5 Mbps UL'],
+  ['GSM/GPRS/EDGE', '850/900/1800/1900 MHz · fallback 2G'],
+  ['GNSS', 'GPS · GLONASS · BeiDou · Galileo (variantes -FASE)'],
+  ['Voz / VoLTE', 'ATD/ATA/AT+CHUP · DTMF · CSD não suportado'],
+  ['SMS', 'Texto e PDU · memória SIM/ME · URC +CMTI'],
+  ['TCP/IP', 'NETOPEN/CIPOPEN · 10 sockets · TCP e UDP'],
+  ['HTTP(S)', 'GET/POST/HEAD/DELETE · TLS via contexto SSL'],
+  ['MQTT(S)', 'AT+CMQTT* · QoS 0-2 · will · TLS'],
+  ['FTP(S) / SMTP', 'AT+CFTPS* e AT+SMTP* (não expostos nesta UI)'],
+  ['Filesystem', 'C:/ interna · certificados via AT+CCERTDOWN'],
+  ['Interfaces', 'UART · USB 2.0 · I2C · SPI · ADC · GPIO · PCM'],
+  ['Sem Bluetooth/Wi-Fi', 'A7672SA não possui rádios BT/Wi-Fi — comandos AT+BT* não existem']
+];
+
+function buildFeatureGrid() {
+  const grid = document.getElementById('featureGrid');
+  if (!grid) return;
+  FEATURES.forEach(([t, d]) => {
+    const el = document.createElement('div');
+    el.className = 'info-card';
+    el.innerHTML = `<div class="card-label">${t}</div><div class="card-unit" style="margin-top:4px;font-size:12px;color:var(--text);">${d}</div>`;
+    grid.appendChild(el);
+  });
+}
+
+// ============================================================
+// MAPA (Leaflet + OpenStreetMap)
+// ============================================================
+let mapObj = null, mapMarker = null, mapTrack = null, mapFollow = true, mapTrackPts = [];
+
+function sizeLeafletMap() {
+  const wrapper = document.getElementById('map-wrapper');
+  const el = document.getElementById('leaflet-map');
+  if (!wrapper || !el) return;
+  if (wrapper.clientHeight > 0) el.style.height = wrapper.clientHeight + 'px';
+  if (wrapper.clientWidth > 0) el.style.width = wrapper.clientWidth + 'px';
+}
+
+function resizeMap() {
+  if (!mapObj) return;
+  sizeLeafletMap();
+  mapObj.invalidateSize(true);
+  if (mapTrackPts.length && mapFollow) mapObj.setView(mapTrackPts[mapTrackPts.length - 1]);
+}
+
+function initMap() {
+  if (mapObj || typeof L === 'undefined') return;
+  sizeLeafletMap();
+  mapObj = L.map('leaflet-map', { zoomControl: true }).setView([-15, -50], 4);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 19
+  }).addTo(mapObj);
+
+  const icon = L.divIcon({
+    className: '',
+    html: `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="42" viewBox="0 0 32 42">
+      <defs>
+        <radialGradient id="pg" cx="40%" cy="35%" r="60%"><stop offset="0%" stop-color="#6ab4ff"/><stop offset="100%" stop-color="#1a6fd4"/></radialGradient>
+        <filter id="sh" x="-30%" y="-20%" width="160%" height="160%"><feDropShadow dx="0" dy="2" stdDeviation="2.5" flood-color="#0004"/></filter>
+      </defs>
+      <path d="M16 2 C8.268 2 2 8.268 2 16 C2 24 16 40 16 40 C16 40 30 24 30 16 C30 8.268 23.732 2 16 2 Z" fill="url(#pg)" filter="url(#sh)" stroke="#fff" stroke-width="1.5"/>
+      <circle cx="16" cy="16" r="6" fill="#fff" opacity="0.92"/></svg>`,
+    iconSize: [32, 42], iconAnchor: [16, 40]
+  });
+
+  mapMarker = L.marker([0, 0], { icon }).addTo(mapObj);
+  mapTrack = L.polyline([], { color: '#58a6ff', weight: 3, opacity: 0.75 }).addTo(mapObj);
+
+  if (mapTrackPts.length) {
+    mapTrack.setLatLngs(mapTrackPts);
+    const last = mapTrackPts[mapTrackPts.length - 1];
+    mapMarker.setLatLng(last);
+    if (mapFollow) mapObj.setView(last, 16);
+  }
+
+  new ResizeObserver(() => resizeMap()).observe(document.getElementById('map-wrapper'));
+  requestAnimationFrame(() => resizeMap());
+  setTimeout(resizeMap, 120);
+}
+
+function haversineKm(a, b) {
+  const R = 6371, toRad = x => x * Math.PI / 180;
+  const dLat = toRad(b[0] - a[0]), dLon = toRad(b[1] - a[1]);
+  const s = Math.sin(dLat/2)**2 + Math.cos(toRad(a[0])) * Math.cos(toRad(b[0])) * Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+function mapUpdate(lat, lon, info) {
+  const ll = [lat, lon];
+  if (mapTrackPts.length) {
+    const d = haversineKm(mapTrackPts[mapTrackPts.length - 1], ll);
+    if (d < 5) trackDistanceKm += d;   // descarta saltos absurdos
+    setText('g-dist', trackDistanceKm.toFixed(2));
+  }
+  mapTrackPts.push(ll);
+  if (mapTrackPts.length > 5000) mapTrackPts.shift();
+  setText('map-coord', `${lat.toFixed(6)}, ${lon.toFixed(6)}`);
+  if (!mapObj) return;
+  mapMarker.setLatLng(ll);
+  mapMarker.bindPopup(`<b>${lat.toFixed(6)}, ${lon.toFixed(6)}</b><br>${info}`);
+  mapTrack.setLatLngs(mapTrackPts);
+  if (mapFollow) mapObj.setView(ll, Math.max(mapObj.getZoom(), 16));
+}
+
+function mapFollowToggle() {
+  mapFollow = !mapFollow;
+  document.getElementById('mapFollowBtn').textContent = mapFollow ? '📍 Seguir' : '📍 Livre';
+  if (mapFollow && mapObj && mapTrackPts.length) mapObj.setView(mapTrackPts[mapTrackPts.length - 1], Math.max(mapObj.getZoom(), 16));
+}
+
+function mapClearTrack() {
+  mapTrackPts = [];
+  trackDistanceKm = 0;
+  setText('g-dist', '0.00');
+  if (mapTrack) mapTrack.setLatLngs([]);
+}
+
+function mapFitTrack() {
+  if (mapObj && mapTrackPts.length > 1) mapObj.fitBounds(mapTrack.getBounds(), { padding: [20, 20] });
+}
+
+function exportGpx() {
+  if (!mapTrackPts.length) { alert('Nenhum ponto no rastro.'); return; }
+  const pts = mapTrackPts.map(([la, lo]) => `      <trkpt lat="${la.toFixed(6)}" lon="${lo.toFixed(6)}"></trkpt>`).join('\n');
+  const gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="A7672SA Controller" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk><name>A7672SA ${new Date().toISOString()}</name><trkseg>
+${pts}
+  </trkseg></trk>
+</gpx>`;
+  downloadFile(`a7672sa-track-${Date.now()}.gpx`, gpx, 'application/gpx+xml');
+}
+
+// ============================================================
+// UI
+// ============================================================
+function showTab(name, el) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('panel-' + name)?.classList.add('active');
+
+  if (el && typeof el !== 'string') el.classList.add('active');
+  else document.querySelector(`.tab[onclick*="'${name}'"]`)?.classList.add('active');
+
+  if (name === 'map') {
+    if (!mapObj) initMap(); else resizeMap();
+    requestAnimationFrame(() => requestAnimationFrame(resizeMap));
+    setTimeout(resizeMap, 130);
+  }
+}
+
+function toggleSection(id) { document.getElementById(id)?.classList.toggle('collapsed'); }
+
+function toggleSidebar() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  overlay.classList.toggle('open', sidebar.classList.toggle('open'));
+}
+
+function closeSidebar() {
+  document.querySelector('.sidebar').classList.remove('open');
+  document.getElementById('sidebarOverlay').classList.remove('open');
+}
+
+// idade do último fix
+setInterval(() => {
+  if (!lastFixTs) return;
+  const s = Math.floor((Date.now() - lastFixTs) / 1000);
+  setText('g-age', s < 120 ? `${s}s` : `${Math.floor(s/60)}min`);
+}, 1000);
+
+// ============================================================
+// INIT
+// ============================================================
+window.addEventListener('load', () => {
+  readBuffer = '';
+  showTab('terminal', 'terminal');
+  onConnModeChange();
+  buildDtmfPad();
+  buildFeatureGrid();
+  updateSmsCounter();
+  document.getElementById('smsCharset').addEventListener('change', updateSmsCounter);
+
+  setCommandsEnabled(false);
+
+  log('sys', 'A7672SA Controller iniciado — SIMCom A76XX AT command set.', 'info');
+  log('sys', 'Conecte via Serial (Web Serial) ou bridge Python. Baud padrão: 115200.', 'info');
+  log('sys', 'Nenhum comando é enviado enquanto não houver conexão ativa.', 'info');
+  log('sys', 'Sem hardware? Escolha "Simulador (sem hardware)" em Interface e clique em Conectar.', 'info');
+
+  if (!('serial' in navigator)) {
+    log('sys', '⚠️ Web Serial indisponível neste navegador (use Chrome/Edge no desktop).', 'err');
+  }
+
+  document.querySelectorAll('.cmd-btn').forEach(btn => {
+    btn.addEventListener('click', () => { if (window.innerWidth <= 768) closeSidebar(); });
+  });
+
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' })
+      .then(reg => {
+        log('sys', `PWA: Service Worker registrado (${reg.scope})`, 'info');
+        reg.update();
+      })
+      .catch(err => log('sys', `PWA: SW não registrado (${err.message})`, 'err'));
+  }
+});
+</script>
+</body>
+</html>

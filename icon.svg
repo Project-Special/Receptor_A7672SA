@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="80" fill="#161b22"/>
+  <!-- Antena -->
+  <line x1="256" y1="56" x2="256" y2="158" stroke="#3b82f6" stroke-width="18" stroke-linecap="round"/>
+  <line x1="206" y1="96" x2="256" y2="56" stroke="#3b82f6" stroke-width="14" stroke-linecap="round"/>
+  <line x1="306" y1="96" x2="256" y2="56" stroke="#3b82f6" stroke-width="14" stroke-linecap="round"/>
+  <!-- Corpo do módulo -->
+  <rect x="126" y="158" width="260" height="236" rx="16" fill="#21262d" stroke="#30363d" stroke-width="6"/>
+  <!-- LED de rede -->
+  <circle cx="352" cy="188" r="14" fill="#3fb950" opacity="0.9"/>
+  <!-- Pinos laterais -->
+  <g fill="#58a6ff">
+    <rect x="96" y="185" width="30" height="12" rx="4"/>
+    <rect x="96" y="215" width="30" height="12" rx="4"/>
+    <rect x="96" y="245" width="30" height="12" rx="4"/>
+    <rect x="96" y="275" width="30" height="12" rx="4"/>
+    <rect x="96" y="305" width="30" height="12" rx="4"/>
+    <rect x="386" y="215" width="30" height="12" rx="4"/>
+    <rect x="386" y="245" width="30" height="12" rx="4"/>
+    <rect x="386" y="275" width="30" height="12" rx="4"/>
+    <rect x="386" y="305" width="30" height="12" rx="4"/>
+  </g>
+  <!-- Chip central -->
+  <rect x="176" y="204" width="160" height="104" rx="8" fill="#0d1117" stroke="#2563eb" stroke-width="3"/>
+  <text x="256" y="248" text-anchor="middle" font-family="monospace" font-size="26" font-weight="bold" fill="#60a5fa">A7672SA</text>
+  <text x="256" y="284" text-anchor="middle" font-family="monospace" font-size="20" font-weight="bold" fill="#8b949e">LTE Cat.1</text>
+  <!-- Barras de sinal -->
+  <g fill="#3fb950">
+    <rect x="176" y="356" width="20" height="18" rx="4"/>
+    <rect x="206" y="344" width="20" height="30" rx="4"/>
+    <rect x="236" y="330" width="20" height="44" rx="4"/>
+    <rect x="266" y="314" width="20" height="60" rx="4" opacity="0.55"/>
+    <rect x="296" y="298" width="20" height="76" rx="4" opacity="0.3"/>
+  </g>
+  <!-- Pin GNSS -->
+  <path d="M256 408 C238 408 224 422 224 440 C224 462 256 486 256 486 C256 486 288 462 288 440 C288 422 274 408 256 408 Z" fill="#da3633"/>
+  <circle cx="256" cy="438" r="11" fill="#fff"/>
+</svg>
