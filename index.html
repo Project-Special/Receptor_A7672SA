@@ -1101,6 +1101,7 @@
                 <div class="section-title">Tempo & qualidade</div>
                 <div class="info-grid" style="grid-template-columns:1fr;">
                   <div class="info-card"><div class="card-label">UTC data/hora</div><div class="card-value" id="g-time" style="font-size:13px;">--</div><div class="card-unit">timestamp GNSS</div></div>
+                  <div class="info-card"><div class="card-label">Hora local</div><div class="card-value" id="g-time-local" style="font-size:13px;">--</div><div class="card-unit" id="g-tz">fuso do navegador</div></div>
                   <div class="info-card"><div class="card-label">Total em uso</div><div class="card-value" id="g-sv-total">--</div><div class="card-unit">satélites</div></div>
                   <div class="info-card"><div class="card-label">C/N0 médio (NMEA)</div><div class="card-value" id="g-cn0">--</div><div class="card-unit">dBHz · via GSV</div></div>
                 </div>
@@ -2898,6 +2899,32 @@ let smsCapture = false;
 
 function setText(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
 
+// ── Tempo GNSS ────────────────────────────────────────────────
+// O GNSS entrega sempre UTC, em ddmmyy + hhmmss(.ss). Monta o instante e
+// deixa o próprio navegador aplicar o fuso — inclusive horário de verão.
+function gnssToDate(ddmmyy, hhmmss) {
+  if (!ddmmyy || !hhmmss || ddmmyy.length < 6 || hhmmss.length < 6) return null;
+  const dt = new Date(Date.UTC(
+    2000 + +ddmmyy.slice(4, 6), +ddmmyy.slice(2, 4) - 1, +ddmmyy.slice(0, 2),
+    +hhmmss.slice(0, 2), +hhmmss.slice(2, 4), +hhmmss.slice(4, 6)
+  ));
+  return isNaN(dt.getTime()) ? null : dt;
+}
+
+function setLocalTime(ddmmyy, hhmmss) {
+  const dt = gnssToDate(ddmmyy, hhmmss);
+  if (!dt) { setText('g-time-local', '--'); return; }
+  const p = n => String(n).padStart(2, '0');
+  setText('g-time-local', `${p(dt.getDate())}/${p(dt.getMonth() + 1)}/${dt.getFullYear()} `
+                        + `${p(dt.getHours())}:${p(dt.getMinutes())}:${p(dt.getSeconds())}`);
+
+  const off = -dt.getTimezoneOffset();
+  const sign = off < 0 ? '−' : '+';
+  const hh = Math.floor(Math.abs(off) / 60), mm = Math.abs(off) % 60;
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local';
+  setText('g-tz', `${zone} · UTC${sign}${hh}${mm ? ':' + p(mm) : ''}`);
+}
+
 // ── GNSS ──────────────────────────────────────────────────────
 const CGNSSINFO_FIELDS = [
   { name: 'Modo do fix',        decode: v => ({ '2':'2D Fix', '3':'3D Fix' }[v] || (v ? v : 'Sem fix')) },
@@ -2978,6 +3005,7 @@ function parseCGNSSINFO(line) {
   setText('g-sv-bds', svBds || '--');
   setText('g-sv-total', total || '--');
   setText('g-time', `${p(8).slice(0,2)}/${p(8).slice(2,4)}/20${p(8).slice(4,6)} ${p(9).slice(0,2)}:${p(9).slice(2,4)}:${p(9).slice(4,6)}`);
+  setLocalTime(p(8), p(9));
 
   lastFixTs = Date.now();
 
@@ -3117,7 +3145,10 @@ function renderNmeaFix() {
   setText('g-sv-gal', s.sv.gal || '--');
   setText('g-sv-bds', s.sv.bds || '--');
   setText('g-sv-total', total || '--');
-  if (s.date) setText('g-time', `${s.date.slice(0,2)}/${s.date.slice(2,4)}/20${s.date.slice(4,6)} ${hms}`);
+  if (s.date) {
+    setText('g-time', `${s.date.slice(0,2)}/${s.date.slice(2,4)}/20${s.date.slice(4,6)} ${hms}`);
+    setLocalTime(s.date, s.time);
+  }
 
   lastFixTs = Date.now();
 
