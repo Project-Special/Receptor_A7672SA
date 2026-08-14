@@ -362,7 +362,14 @@
 
     .info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
 
-    .info-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+    /* Altura fixa + rodapé ancorado: os cards ficam idênticos mesmo com
+       valores de fonte diferente (hora em 13px, DOP em 20px) ou legenda
+       de duas linhas. */
+    .info-card {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 12px 14px;
+      display: flex; flex-direction: column; min-height: 92px;
+    }
 
     .info-card .card-label {
       font-size: 11px;
@@ -372,9 +379,9 @@
       margin-bottom: 6px;
     }
 
-    .info-card .card-value { font-family: var(--mono); font-size: 20px; font-weight: 600; color: var(--text); word-break: break-all; }
+    .info-card .card-value { font-family: var(--mono); font-size: 20px; font-weight: 600; color: var(--text); word-break: break-all; line-height: 1.3; }
     .info-card .card-value.big { font-size: 24px; }
-    .info-card .card-unit { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+    .info-card .card-unit { font-size: 11px; color: var(--text-dim); margin-top: auto; padding-top: 4px; }
     .info-card.highlight { border-color: #58a6ff44; background: #111d2c; }
     .info-card.highlight .card-value { color: #58a6ff; }
     .info-card.good  .card-value { color: var(--green); }
@@ -566,6 +573,7 @@
       .cmd-btn .at-cmd { display: none; }
 
       .info-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+      .info-card { min-height: 84px; }
       .info-card .card-value { font-size: 18px; }
       .info-card .card-value.big { font-size: 22px; }
 
