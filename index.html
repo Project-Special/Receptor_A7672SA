@@ -1092,6 +1092,7 @@
                 <div class="info-grid" style="grid-template-columns:1fr;">
                   <div class="info-card"><div class="card-label">GPS</div><div class="card-value" id="g-sv-gps">--</div><div class="card-unit">em uso</div></div>
                   <div class="info-card"><div class="card-label">GLONASS</div><div class="card-value" id="g-sv-glo">--</div><div class="card-unit">em uso</div></div>
+                  <div class="info-card"><div class="card-label">Galileo</div><div class="card-value" id="g-sv-gal">--</div><div class="card-unit">em uso · só via NMEA</div></div>
                   <div class="info-card"><div class="card-label">BeiDou</div><div class="card-value" id="g-sv-bds">--</div><div class="card-unit">em uso</div></div>
                 </div>
               </div>
@@ -3015,23 +3016,56 @@ function parseGnssPwr(line) {
 }
 
 // ── NMEA ──────────────────────────────────────────────────────
-let nmeaSnrAcc = [], nmeaLastGga = 0;
+let nmeaSnrAcc = [], nmeaLastRender = 0;
+
+// Um fix NMEA chega fatiado em ~15 sentenças por segundo: cada tipo traz um
+// pedaço do quadro. Acumulamos aqui e renderizamos o conjunto.
+const nmeaState = {
+  lat: null, lon: null, alt: NaN, quality: 0, satsGga: 0,
+  spdKn: 0, cog: 0, date: '', time: '',
+  fixMode: 0, pdop: '', hdop: '', vdop: '',
+  sv: { gps: 0, glo: 0, gal: 0, bds: 0 }
+};
+
+const GSA_SYSTEM = { 1: 'gps', 2: 'glo', 3: 'gal', 4: 'bds' };
+const NMEA_TALKER = { GP: 'gps', GL: 'glo', GA: 'gal', GB: 'bds', BD: 'bds' };
 
 function parseNmea(line) {
   appendConsole('nmea-console', line, 'Ative o stream NMEA para ver as sentenças brutas.');
   const body = line.slice(1).split('*')[0];
   const f = body.split(',');
   const type = f[0].slice(-3);
+  const s = nmeaState;
 
-  if (type === 'GGA' && f[2] && f[4] && f[6] !== '0') {
-    const lat = nmeaToDeg(f[2]) * (f[3] === 'S' ? -1 : 1);
-    const lon = nmeaToDeg(f[4]) * (f[5] === 'W' ? -1 : 1);
-    const alt = parseFloat(f[9]);
-    if (Date.now() - nmeaLastGga > 900) {
-      nmeaLastGga = Date.now();
-      mapUpdate(lat, lon, `NMEA GGA · Alt ${isNaN(alt) ? '--' : alt.toFixed(0)} m · ${f[7]} sat`);
-      setText('map-coord', `${lat.toFixed(6)}, ${lon.toFixed(6)}`);
+  if (type === 'GGA') {
+    s.time = f[1] || s.time;
+    s.quality = parseInt(f[6], 10) || 0;
+    s.satsGga = parseInt(f[7], 10) || 0;
+    if (s.quality > 0 && f[2] && f[4]) {
+      s.lat = nmeaToDeg(f[2]) * (f[3] === 'S' ? -1 : 1);
+      s.lon = nmeaToDeg(f[4]) * (f[5] === 'W' ? -1 : 1);
+      s.alt = parseFloat(f[9]);
     }
+  }
+
+  if (type === 'RMC') {
+    s.time = f[1] || s.time;
+    s.date = f[9] || s.date;
+    if (f[2] === 'A' && f[3] && f[5]) {
+      s.lat = nmeaToDeg(f[3]) * (f[4] === 'S' ? -1 : 1);
+      s.lon = nmeaToDeg(f[5]) * (f[6] === 'W' ? -1 : 1);
+      s.spdKn = parseFloat(f[7]) || 0;
+      s.cog = parseFloat(f[8]) || 0;
+    }
+  }
+
+  // Vem uma GSA por constelação. Os satélites EM USO estão nos campos 3..14 e
+  // o último campo identifica o sistema (NMEA 4.10+); sem ele, cai no talker.
+  if (type === 'GSA') {
+    s.fixMode = parseInt(f[2], 10) || 0;
+    s.pdop = f[15] || ''; s.hdop = f[16] || ''; s.vdop = f[17] || '';
+    const key = GSA_SYSTEM[parseInt(f[18], 10)] || NMEA_TALKER[line.slice(1, 3)];
+    if (key) s.sv[key] = f.slice(3, 15).filter(v => v).length;
   }
 
   if (type === 'GSV') {
@@ -3045,6 +3079,56 @@ function parseNmea(line) {
       setText('g-cn0', avg.toFixed(0));
     }
   }
+
+  if (Date.now() - nmeaLastRender > 900) { nmeaLastRender = Date.now(); renderNmeaFix(); }
+}
+
+// Alimenta os mesmos cards que o +CGNSSINFO preenche, a partir do NMEA.
+function renderNmeaFix() {
+  const s = nmeaState;
+  if (s.lat === null || s.lon === null || !s.quality) return;
+
+  const total  = s.satsGga || (s.sv.gps + s.sv.glo + s.sv.gal + s.sv.bds);
+  const alt    = isNaN(s.alt) ? null : s.alt;
+  const spdKmh = s.spdKn * 1.852;
+  const hms    = `${s.time.slice(0,2)}:${s.time.slice(2,4)}:${s.time.slice(4,6)}`;
+  const dop    = v => v ? `${parseFloat(v).toFixed(1)} (${dopQual(parseFloat(v))})` : '--';
+
+  fixSearchStart = null;
+  const dot = document.getElementById('gnss-fix-dot');
+  if (dot) dot.className = 'fix-indicator fix';
+  setText('gnss-fix-title', `Fix ${s.fixMode === 3 ? '3D' : '2D'} (NMEA) — ${s.lat.toFixed(6)}, ${s.lon.toFixed(6)}`);
+  setText('gnss-fix-sub', `Alt ${alt === null ? '--' : alt.toFixed(0)} m · ${total} satélites · HDOP ${s.hdop || '--'} · ${hms} UTC`);
+
+  setText('g-lat', s.lat.toFixed(6) + '°');
+  setText('g-lat-dms', decToDMS(s.lat, 'NS'));
+  setText('g-lon', s.lon.toFixed(6) + '°');
+  setText('g-lon-dms', decToDMS(s.lon, 'EW'));
+  setText('g-alt', alt === null ? '--' : alt.toFixed(1));
+  setText('g-fixmode', s.fixMode === 3 ? '3D' : s.fixMode === 2 ? '2D' : '--');
+  setText('g-spd', spdKmh.toFixed(1));
+  setText('g-cog', s.cog.toFixed(1) + '°');
+  setText('g-cog-dir', cogToDir(s.cog));
+  setText('g-pdop', dop(s.pdop));
+  setText('g-hdop', dop(s.hdop));
+  setText('g-vdop', dop(s.vdop));
+  setText('g-sv-gps', s.sv.gps || '--');
+  setText('g-sv-glo', s.sv.glo || '--');
+  setText('g-sv-gal', s.sv.gal || '--');
+  setText('g-sv-bds', s.sv.bds || '--');
+  setText('g-sv-total', total || '--');
+  if (s.date) setText('g-time', `${s.date.slice(0,2)}/${s.date.slice(2,4)}/20${s.date.slice(4,6)} ${hms}`);
+
+  lastFixTs = Date.now();
+
+  const ml = document.getElementById('mapLink');
+  if (ml) { ml.href = `https://www.google.com/maps?q=${s.lat},${s.lon}`; ml.style.display = 'inline-flex'; }
+
+  mapUpdate(s.lat, s.lon, `NMEA · Alt ${alt === null ? '--' : alt.toFixed(0)} m | ${spdKmh.toFixed(1)} km/h | ${total} sat | HDOP ${s.hdop || '--'}`);
+  setText('map-coord', `${s.lat.toFixed(6)}, ${s.lon.toFixed(6)}`);
+  setText('map-spd', `🚀 ${spdKmh.toFixed(1)} km/h`);
+  setText('map-sat', `🛰️ ${total} sat`);
+  setText('map-hdop', `HDOP ${s.hdop || '--'}`);
 }
 
 function decToDMS(deg, axis) {
