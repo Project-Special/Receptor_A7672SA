@@ -2807,6 +2807,7 @@ function simulateResponse(cmd) {
 // ============================================================
 let lastCmd = '';
 let httpExpectedLen = 0;
+let httpReadRemaining = 0;
 let headCapture = false;
 
 // URCs que podem chegar no meio de um payload (GNSS, MQTT, rede, chamada) e que
@@ -2817,16 +2818,18 @@ function parseResponse(line) {
   // NMEA bruto — sempre tem prioridade, chega intercalado com qualquer outra coisa
   if (line.startsWith('$G') || line.startsWith('$B')) { parseNmea(line); return; }
 
-  // Corpo de HTTPREAD em andamento
+  // Corpo de HTTPREAD em andamento. O módulo anuncia o tamanho em
+  // '+HTTPREAD: <n>' e envia exatamente n bytes, então contamos bytes em vez de
+  // encerrar num 'OK': esse 'OK' tanto pode fazer parte do payload quanto vir de
+  // outro comando disparado em paralelo.
   if (httpReadPending) {
-    if (isFinalLine(line)) {
-      httpReadPending = false;
-      setText('http-state', line === 'OK' ? 'Concluído' : 'Erro');
-    } else if (/^\+HTTPREAD: 0$/.test(line)) {
-      httpReadPending = false;
+    if (/^\+HTTPREAD:\s*0\b/.test(line)) {
+      httpReadPending = false; httpReadRemaining = 0;
       setText('http-state', 'Concluído');
     } else if (!line.startsWith('+HTTPREAD:') && !URC_PREFIXES.test(line)) {
       appendHttpResponse(line);
+      httpReadRemaining -= byteLen(line) + 1;   // +1 pelo \n descartado no split
+      if (httpReadRemaining <= 0) { httpReadPending = false; setText('http-state', 'Concluído'); }
       return;
     }
   }
@@ -3312,18 +3315,22 @@ function parseHTTPREAD(line) {
   const m = line.match(/\+HTTPREAD:\s*(\d+)/);
   if (!m) return;
   const n = parseInt(m[1], 10);
-  if (n === 0) { httpReadPending = false; setText('http-state', 'Concluído'); return; }
+  if (n === 0) { httpReadPending = false; httpReadRemaining = 0; setText('http-state', 'Concluído'); return; }
   setText('http-bytes', n);
   setText('http-state', 'Lendo payload');
-  setHttpResponse('');
+  clearHttpResponse();
   httpReadPending = true;
+  httpReadRemaining = n;
 }
 
-function setHttpResponse(t) { const b = document.getElementById('http-response'); if (b) b.textContent = t || 'Aguardando HTTPREAD...'; }
+const HTTP_PLACEHOLDER = 'Aguardando HTTPREAD...';
+
+function setHttpResponse(t) { const b = document.getElementById('http-response'); if (b) b.textContent = t || HTTP_PLACEHOLDER; }
+function clearHttpResponse() { const b = document.getElementById('http-response'); if (b) b.textContent = ''; }
 function appendHttpResponse(t) {
   const b = document.getElementById('http-response');
   if (!b) return;
-  if (b.textContent === 'Aguardando HTTPREAD...') b.textContent = '';
+  if (b.textContent === HTTP_PLACEHOLDER) b.textContent = '';
   b.textContent += (b.textContent ? '\n' : '') + t;
   b.scrollTop = b.scrollHeight;
 }
