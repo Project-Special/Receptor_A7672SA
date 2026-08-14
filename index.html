@@ -2808,6 +2808,7 @@ function simulateResponse(cmd) {
 let lastCmd = '';
 let httpExpectedLen = 0;
 let httpReadRemaining = 0;
+let httpReadKeep = false;   // leitura paginada em curso: não limpar entre blocos
 let headCapture = false;
 
 // URCs que podem chegar no meio de um payload (GNSS, MQTT, rede, chamada) e que
@@ -3316,9 +3317,8 @@ function parseHTTPREAD(line) {
   if (!m) return;
   const n = parseInt(m[1], 10);
   if (n === 0) { httpReadPending = false; httpReadRemaining = 0; setText('http-state', 'Concluído'); return; }
-  setText('http-bytes', n);
+  if (!httpReadKeep) { setText('http-bytes', n); clearHttpResponse(); }
   setText('http-state', 'Lendo payload');
-  clearHttpResponse();
   httpReadPending = true;
   httpReadRemaining = n;
 }
@@ -3721,9 +3721,50 @@ function httpAction(method) {
   setText('http-state', 'Executando');
 }
 
-function httpReadAll() {
-  const n = httpExpectedLen || 4096;
-  send(`AT+HTTPREAD=0,${n}`);
+const HTTP_CHUNK = 1024;
+
+// Lê o corpo em blocos. Pedir uma resposta grande de uma vez só enche o buffer
+// da UART antes de o navegador drenar — o overrun aparece como corpo truncado.
+async function httpReadAll() {
+  if (!requireConnection('HTTPREAD')) return;
+  const total = httpExpectedLen || HTTP_CHUNK;
+
+  clearHttpResponse();
+  setText('http-bytes', total);
+  httpReadKeep = true;
+
+  let off = 0;
+  while (off < total) {
+    const size = Math.min(HTTP_CHUNK, total - off);
+    const done = waitFor(l => /^\+HTTPREAD:\s*0\b/.test(l), 15000);
+    if (await send(`AT+HTTPREAD=${off},${size}`) === false) break;
+    if (!await done) { log('sys', `Timeout lendo os bytes ${off}–${off + size}.`, 'err'); break; }
+    off += size;
+    await delay(60);
+  }
+
+  httpReadKeep = false;
+  httpReadPending = false;
+  setText('http-state', off >= total ? 'Concluído' : `Parcial (${off}/${total} bytes)`);
+}
+
+// Sem contexto PDP ativo o AT+HTTPACTION só falha depois de 60 s de timeout,
+// sem indicar que o problema é rede e não HTTP. Verifica antes.
+async function httpNetworkReady() {
+  const att = await queryValue('AT+CGATT?', l => l.startsWith('+CGATT:'), 5000);
+  if (att && !/\+CGATT:\s*1/.test(att)) {
+    log('sys', 'Sem attach de pacotes (+CGATT: 0). Configure o APN na seção Dados.', 'err');
+    return false;
+  }
+  await waitOk(3000);
+
+  const addr = await queryValue('AT+CGPADDR', l => l.startsWith('+CGPADDR:'), 5000);
+  if (addr && /"?0\.0\.0\.0"?/.test(addr)) {
+    log('sys', 'Contexto PDP sem IP (0.0.0.0). Configure o APN na seção Dados.', 'err');
+    return false;
+  }
+  await waitOk(3000);
+  return true;
 }
 
 async function httpRequest() {
@@ -3734,9 +3775,11 @@ async function httpRequest() {
   const body = document.getElementById('httpBody').value;
   const ssl = document.getElementById('httpSslChk').checked || /^https:/i.test(url);
 
-  setText('http-state', 'Executando');
+  setText('http-state', 'Verificando rede');
   setHttpResponse('');
+  if (!await httpNetworkReady()) { setText('http-state', 'Sem rede de dados'); return; }
 
+  setText('http-state', 'Executando');
   await sendWait('AT+HTTPTERM', 3000);
   await sendWait('AT+HTTPINIT', 6000);
   await sendWait(`AT+HTTPPARA="URL","${url.replace(/"/g,'%22')}"`);
@@ -3760,7 +3803,7 @@ async function httpRequest() {
   const res = await act;
   if (!res) { log('sys', 'Timeout aguardando +HTTPACTION.', 'err'); setText('http-state', 'Timeout'); return; }
   await delay(200);
-  httpReadAll();
+  await httpReadAll();
 }
 
 // ── MQTT ──────────────────────────────────────────────────────
