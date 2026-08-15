@@ -3069,7 +3069,7 @@ function parseCGNSSINFO(line) {
     dot.className = 'fix-indicator nofix';
     const elapsed = Math.floor((Date.now() - fixSearchStart) / 1000);
     title.textContent = `🔍 Buscando fix... (${elapsed}s)`;
-    sub.textContent = 'Sem posição válida. Antena com vista para o céu, TTFF a frio pode levar 30–90 s.';
+    sub.textContent = 'Sem posição válida. TTFF a frio: 30–90 s com vista para o céu.' + gnssSkyReport();
     renderGnssTable(parts, hasFix, L);
 
     // Confere a alimentação do receptor de tempos em tempos: sem isso o poll
@@ -3186,6 +3186,26 @@ function parseGnssPwr(line) {
 
 // ── NMEA ──────────────────────────────────────────────────────
 let nmeaSnrAcc = [], nmeaLastRender = 0;
+// Melhor SNR por satélite, chaveado por talker+PRN para não misturar o
+// satélite 12 do GPS com o 12 do GLONASS.
+const nmeaSats = {};
+
+// Sem fix, a saúde da antena só aparece nas GSV. O que decide não é o SNR
+// máximo e sim QUANTOS satélites passam de ~30 dBHz: abaixo disso não entram
+// na solução, e são necessários 4 para um fix 3D.
+function gnssSkyReport() {
+  const now = Date.now();
+  const live = Object.values(nmeaSats).filter(s => now - s.t < 15000);
+  if (!live.length) return '';
+
+  const comSinal = live.filter(s => s.snr > 0);
+  const uteis = live.filter(s => s.snr >= 30).length;
+  const max = comSinal.length ? Math.max(...comSinal.map(s => s.snr)) : 0;
+
+  const veredito = uteis >= 4 ? 'sinal suficiente — deve fechar fix'
+    : `só ${uteis} acima de 30 dBHz, precisa de 4 — antena obstruída ou conector frouxo`;
+  return ` · ${live.length} em vista, ${comSinal.length} com sinal · SNR máx ${max} dBHz · ${veredito}`;
+}
 
 // Um fix NMEA chega fatiado em ~15 sentenças por segundo: cada tipo traz um
 // pedaço do quadro. Acumulamos aqui e renderizamos o conjunto.
@@ -3238,8 +3258,13 @@ function parseNmea(line) {
   }
 
   if (type === 'GSV') {
+    // Cada satélite ocupa 4 campos: PRN, elevação, azimute, SNR.
+    const talker = line.slice(1, 3);
     for (let i = 7; i < f.length; i += 4) {
+      const prn = (f[i - 3] || '').trim();
+      if (!prn) continue;
       const snr = parseInt(f[i], 10);
+      nmeaSats[talker + prn] = { snr: isNaN(snr) ? 0 : snr, t: Date.now() };
       if (!isNaN(snr) && snr > 0) nmeaSnrAcc.push(snr);
     }
     if (nmeaSnrAcc.length > 24) nmeaSnrAcc = nmeaSnrAcc.slice(-24);
