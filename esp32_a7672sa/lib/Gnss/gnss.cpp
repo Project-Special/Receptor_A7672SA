@@ -32,6 +32,13 @@ bool A7672Gnss::powerOn(int mode, uint32_t readyTimeoutMs) {
     });
   }
 
+  // Reenviar CGNSSPWR=1 num receptor já ligado REINICIA o motor e derruba um
+  // fix válido — custa outros 30-90 s de reaquisição por nada.
+  if (isPowered()) {
+    setPortRouting();
+    return true;
+  }
+
   if (!_c.at("AT+CGNSSPWR=1", 12000)) return false;    // variante sem GNSS dá ERROR
 
   // O receptor só aceita configuração depois desta URC.
@@ -45,6 +52,14 @@ bool A7672Gnss::powerOn(int mode, uint32_t readyTimeoutMs) {
 bool A7672Gnss::powerOff() {
   _fix = GnssFix();
   return _c.at("AT+CGNSSPWR=0", 10000);
+}
+
+bool A7672Gnss::isPowered() {
+  String r = _c.queryLine("AT+CGNSSPWR?", "+CGNSSPWR:", 5000);
+  if (!r.length()) return false;
+  String v = r.substring(r.indexOf(':') + 1);
+  v.trim();
+  return v.startsWith("1");
 }
 
 bool A7672Gnss::readFix(GnssFix& out) {

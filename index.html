@@ -3071,9 +3071,14 @@ function parseCGNSSINFO(line) {
     title.textContent = `🔍 Buscando fix... (${elapsed}s)`;
     sub.textContent = 'Sem posição válida. Antena com vista para o céu, TTFF a frio pode levar 30–90 s.';
     renderGnssTable(parts, hasFix, L);
+
+    // Confere a alimentação do receptor de tempos em tempos: sem isso o poll
+    // seguiria consultando para sempre um GNSS que já caiu.
+    if (++gnssEmptyStreak % 20 === 0 && gnssPollTimer) verifyGnssStillOn();
     return;
   }
 
+  gnssEmptyStreak = 0;
   fixSearchStart = null;
   const lat = gnssCoord(p(L.lat), p(L.ns), 90);
   const lon = gnssCoord(p(L.lon), p(L.ew), 180);
@@ -3676,7 +3681,10 @@ async function gnssOn() {
   // um fix válido. Como o auto-init chama isto a cada conexão, só ligamos o que
   // ainda não está ligado — e o mesmo vale para modo e roteamento.
   const pwr = await queryValue('AT+CGNSSPWR?', l => l.startsWith('+CGNSSPWR:'), 5000);
-  await waitOk(2000);
+  // Dreno curto do OK: o queryValue devolve na linha do valor e deixa o OK
+  // para trás. Se ele já passou, esperar 2 s aqui é tempo morto puro; 400 ms
+  // bastam para capturar um OK ainda em voo e não confundir o próximo comando.
+  await waitOk(400);
   const alreadyOn = pwr && /\+CGNSSPWR:\s*1/.test(pwr);
 
   if (alreadyOn) {
@@ -3698,7 +3706,7 @@ async function gnssOn() {
   const mode = document.getElementById('gnssModeSel')?.value;
   if (mode) {
     const cur = await queryValue('AT+CGNSSMODE?', l => l.startsWith('+CGNSSMODE:'), 5000);
-    await waitOk(2000);
+    await waitOk(400);
     if (!cur || cur.replace(/\D/g, '') !== String(mode)) {
       const r = await sendWait(`AT+CGNSSMODE=${mode}`);
       if (r && /ERROR/.test(r)) log('sys', `AT+CGNSSMODE=${mode} recusado (${r}).`, 'err');
@@ -3708,13 +3716,13 @@ async function gnssOn() {
   // Roteamento errado faz o +CGNSSINFO voltar vazio mesmo com fix 3D válido.
   const want = gnssPortPair();
   const port = await queryValue('AT+CGNSSPORTSWITCH?', l => l.startsWith('+CGNSSPORTSWITCH:'), 5000);
-  await waitOk(2000);
+  await waitOk(400);
   if (!port || port.substring(port.indexOf(':') + 1).replace(/\s/g, '') !== want)
     await sendWait(`AT+CGNSSPORTSWITCH=${want}`);
 
   log('sys', alreadyOn ? 'GNSS ativo. Consultando posição...'
                        : 'GNSS ligado. Aguardando fix (30–90 s a frio).', 'info');
-  startGnssPoll();
+  await startGnssPoll(true);   // a alimentação acabou de ser confirmada acima
 }
 
 function gnssOff() {
@@ -3748,10 +3756,26 @@ async function nmeaStart() {
 
 function nmeaStop() { nmeaStreaming = false; send('AT+CGNSSTST=0'); }
 
+// Estado de alimentação do receptor. null = módulo não respondeu.
+async function gnssPowered() {
+  const r = await queryValue('AT+CGNSSPWR?', l => l.startsWith('+CGNSSPWR:'), 5000);
+  await waitOk(400);
+  return r ? /\+CGNSSPWR:\s*1/.test(r) : null;
+}
+
 // Uma consulta única não basta: logo após ligar o receptor a resposta vem
 // vazia, e sem repetição o painel fica parado em "Buscando fix" para sempre.
-function startGnssPoll() {
+// Mas polling com o receptor desligado só inunda a serial — confere antes.
+// `knownOn` evita reconsultar quando quem chama acabou de verificar.
+async function startGnssPoll(knownOn) {
+  if (!requireConnection('poll de GNSS')) return;
   if (gnssPollTimer) { send('AT+CGNSSINFO'); return; }
+
+  const on = knownOn === true ? true : await gnssPowered();
+  if (on === null) { log('sys', 'Módulo não respondeu ao AT+CGNSSPWR? — poll não iniciado.', 'err'); return; }
+  if (on === false) { log('sys', 'Receptor GNSS desligado (+CGNSSPWR: 0) — poll não iniciado. Use "Ligar GNSS".', 'err'); return; }
+
+  gnssEmptyStreak = 0;
   const s = parseInt(document.getElementById('gnssPollInterval')?.value, 10) || 2;
   gnssPollTimer = setInterval(() => send('AT+CGNSSINFO'), s * 1000);
   const btn = document.getElementById('gnssPollBtn');
@@ -3768,7 +3792,28 @@ function stopGnssPoll() {
   log('sys', 'Poll de GNSS desativado.', 'info');
 }
 
-function toggleGnssPoll() { gnssPollTimer ? stopGnssPoll() : startGnssPoll(); }
+function toggleGnssPoll() { if (gnssPollTimer) stopGnssPoll(); else startGnssPoll(); }
+
+// Sequência de respostas vazias seguidas. Serve para distinguir "ainda
+// procurando" de "receptor caiu" sem consultar a cada leitura.
+let gnssEmptyStreak = 0, gnssVerifying = false;
+
+async function verifyGnssStillOn() {
+  if (gnssVerifying) return;
+  gnssVerifying = true;
+  try {
+    const on = await gnssPowered();
+    if (on === false) {
+      stopGnssPoll();
+      log('sys', 'Receptor GNSS desligou (+CGNSSPWR: 0) — poll interrompido, sem mais comandos.', 'err');
+    } else if (on === null) {
+      stopGnssPoll();
+      log('sys', 'Módulo parou de responder — poll de GNSS interrompido.', 'err');
+    } else {
+      log('sys', `GNSS ligado, mas sem fix há ${gnssEmptyStreak} leituras. Antena no conector GPS(4G) e com vista para o céu?`, 'info');
+    }
+  } finally { gnssVerifying = false; }
+}
 
 function setGnssView(view) {
   const map = { decoded: 'gnss-view-decoded', raw: 'gnss-view-raw', nmea: 'gnss-view-nmea' };
@@ -3938,14 +3983,14 @@ async function httpNetworkReady() {
     log('sys', 'Sem attach de pacotes (+CGATT: 0). Configure o APN na seção Dados.', 'err');
     return false;
   }
-  await waitOk(3000);
+  await waitOk(400);
 
   const addr = await queryValue('AT+CGPADDR', l => l.startsWith('+CGPADDR:'), 5000);
   if (addr && /"?0\.0\.0\.0"?/.test(addr)) {
     log('sys', 'Contexto PDP sem IP (0.0.0.0). Configure o APN na seção Dados.', 'err');
     return false;
   }
-  await waitOk(3000);
+  await waitOk(400);
   return true;
 }
 
@@ -4209,11 +4254,11 @@ async function readIdentity() {
 
   const imei = await queryValue('AT+CGSN', l => /^\d{15}$/.test(l));
   if (imei) { identity.imei = imei; setText('i-imei', imei); }
-  await waitOk(3000);
+  await waitOk(400);
 
   const imsi = await queryValue('AT+CIMI', l => /^\d{14,15}$/.test(l) && l !== identity.imei);
   if (imsi) { identity.imsi = imsi; setText('i-imsi', imsi); }
-  await waitOk(3000);
+  await waitOk(400);
 
   for (const c of ['AT+CICCID', 'AT+CNUM', 'AT+CGMR']) { await sendWait(c, 6000); await delay(80); }
 }

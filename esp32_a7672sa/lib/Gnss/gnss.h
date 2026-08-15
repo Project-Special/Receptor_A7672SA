@@ -29,6 +29,10 @@ public:
   bool powerOn(int mode = 3, uint32_t readyTimeoutMs = 20000);
   bool powerOff();
 
+  // Consulta AT+CGNSSPWR?. Antes de consultar posição em laço, verifique isto:
+  // com o receptor desligado o +CGNSSINFO responde vazio para sempre.
+  bool isPowered();
+
   // Consulta pontual via +CGNSSINFO.
   bool readFix(GnssFix& out);
 
