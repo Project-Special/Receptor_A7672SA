@@ -1014,6 +1014,10 @@
           <button class="clear-btn" onclick="sendEsc()" title="Envia 0x1B (cancela modo de dados)">ESC</button>
           <button class="clear-btn" onclick="clearTerminal()">Limpar</button>
           <button class="clear-btn" onclick="exportLog()" title="Baixa o log do terminal">⬇</button>
+          <label class="conn-label" style="display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap;"
+                 title="O poll de GNSS a cada 2 s domina o terminal. Isto esconde só as linhas dele — o painel e o mapa continuam atualizando.">
+            <input type="checkbox" id="hideGnssLog" style="accent-color:var(--accent);" /> Ocultar GNSS
+          </label>
         </div>
       </div>
 
@@ -1301,7 +1305,8 @@
             position:absolute;bottom:14px;left:12px;right:12px;
             z-index:1000;display:flex;gap:8px;flex-wrap:wrap;justify-content:center;pointer-events:none;">
             <button class="action-btn secondary" onclick="showTab('gnss')">← GNSS</button>
-            <button class="action-btn" onclick="mapFollowToggle()" id="mapFollowBtn">📍 Seguir</button>
+            <button class="action-btn" onclick="mapFollowToggle()" id="mapFollowBtn"
+                    title="Recentrando a cada posição. Arraste o mapa ou clique para soltar.">📍 Seguindo GPS</button>
             <button class="action-btn secondary" onclick="mapClearTrack()">🗑️ Limpar rastro</button>
             <button class="action-btn secondary" onclick="mapFitTrack()">🔲 Ver tudo</button>
             <button class="action-btn secondary" onclick="exportGpx()">⬇ GPX</button>
@@ -2207,7 +2212,25 @@ function handleKey(e) {
 // ============================================================
 // LOG
 // ============================================================
+// Tráfego do poll de GNSS: comando, eco, resposta e as sentenças NMEA.
+function isGnssTraffic(msg) {
+  const m = String(msg).trim();
+  return /^\$[A-Z]{2}[A-Z]{3}/.test(m)          // NMEA
+      || /^AT\+CGNSSINFO/i.test(m)              // TX e eco
+      || /^\+CGNSSINFO:/.test(m);
+}
+
+let gnssOkPending = false;   // o 'OK' que fecha um CGNSSINFO oculto
+
 function log(dir, msg, cls) {
+  // Filtro só do terminal: o painel, o mapa e o rastro seguem alimentados
+  // normalmente, porque parseResponse() roda antes desta função.
+  if (document.getElementById('hideGnssLog')?.checked) {
+    if (isGnssTraffic(msg)) { gnssOkPending = true; return; }
+    if (gnssOkPending && dir === 'rx' && String(msg).trim() === 'OK') { gnssOkPending = false; return; }
+    gnssOkPending = false;
+  }
+
   const term = document.getElementById('terminal');
   const atBottom = term.scrollHeight - term.scrollTop - term.clientHeight < 40;
   const entry = document.createElement('div');
@@ -4377,6 +4400,11 @@ function initMap() {
   mapMarker = L.marker([0, 0], { icon }).addTo(mapObj);
   mapTrack = L.polyline([], { color: '#58a6ff', weight: 3, opacity: 0.75 }).addTo(mapObj);
 
+  // Arrastar o mapa solta o seguimento na hora. 'dragstart' só dispara em
+  // gesto do usuário — o setView() do recentramento automático não o aciona,
+  // então não há risco de se desligar sozinho.
+  mapObj.on('dragstart', () => { if (mapFollow) setMapFollow(false, true); });
+
   if (mapTrackPts.length) {
     mapTrack.setLatLngs(mapTrackPts);
     const last = mapTrackPts[mapTrackPts.length - 1];
@@ -4413,11 +4441,25 @@ function mapUpdate(lat, lon, info) {
   if (mapFollow) mapObj.setView(ll, Math.max(mapObj.getZoom(), 16));
 }
 
-function mapFollowToggle() {
-  mapFollow = !mapFollow;
-  document.getElementById('mapFollowBtn').textContent = mapFollow ? '📍 Seguir' : '📍 Livre';
-  if (mapFollow && mapObj && mapTrackPts.length) mapObj.setView(mapTrackPts[mapTrackPts.length - 1], Math.max(mapObj.getZoom(), 16));
+// `porArraste` distingue o desligamento automático do clique no botão, para
+// avisar uma única vez em vez de a cada gesto.
+function setMapFollow(on, porArraste) {
+  mapFollow = on;
+  const btn = document.getElementById('mapFollowBtn');
+  if (btn) {
+    // O rótulo mostra o ESTADO atual, não a ação: "Seguir" sozinho parecia um
+    // botão a clicar, e ninguém descobria que o mapa já podia ser solto.
+    btn.textContent = on ? '📍 Seguindo GPS' : '🖐️ Mapa livre';
+    btn.classList.toggle('secondary', !on);
+    btn.title = on ? 'Recentrando a cada posição. Arraste o mapa ou clique para soltar.'
+                   : 'Mapa livre: arraste à vontade. Clique para voltar a seguir o GPS.';
+  }
+  if (on && mapObj && mapTrackPts.length)
+    mapObj.setView(mapTrackPts[mapTrackPts.length - 1], Math.max(mapObj.getZoom(), 16));
+  if (porArraste) log('sys', 'Mapa solto — não recentra mais. Clique em "Mapa livre" para voltar a seguir.', 'info');
 }
+
+function mapFollowToggle() { setMapFollow(!mapFollow); }
 
 function mapClearTrack() {
   mapTrackPts = [];
@@ -4427,7 +4469,11 @@ function mapClearTrack() {
 }
 
 function mapFitTrack() {
-  if (mapObj && mapTrackPts.length > 1) mapObj.fitBounds(mapTrack.getBounds(), { padding: [20, 20] });
+  if (!mapObj || mapTrackPts.length < 2) return;
+  // Enquadrar o rastro inteiro e continuar seguindo se anulam: a próxima
+  // posição recentraria no marcador e desfaria o enquadramento.
+  if (mapFollow) setMapFollow(false);
+  mapObj.fitBounds(mapTrack.getBounds(), { padding: [20, 20] });
 }
 
 function exportGpx() {
