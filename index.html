@@ -3651,32 +3651,49 @@ function toggleAutoNetwork() {
 async function gnssOn() {
   if (!requireConnection('ligar GNSS')) return;
 
-  // O waiter da URC é registrado ANTES do envio: '+CGNSSPWR: READY!' pode chegar
-  // no mesmo chunk serial do 'OK', e aí não haveria tempo de registrá-lo depois.
-  const ready = waitFor(l => l.startsWith('+CGNSSPWR: READY'), 20000);
+  // Reenviar CGNSSPWR=1 num receptor já ligado REINICIA o motor GNSS e derruba
+  // um fix válido. Como o auto-init chama isto a cada conexão, só ligamos o que
+  // ainda não está ligado — e o mesmo vale para modo e roteamento.
+  const pwr = await queryValue('AT+CGNSSPWR?', l => l.startsWith('+CGNSSPWR:'), 5000);
+  await waitOk(2000);
+  const alreadyOn = pwr && /\+CGNSSPWR:\s*1/.test(pwr);
 
-  const res = await sendWait('AT+CGNSSPWR=1', 12000);
-  if (res && /ERROR/.test(res)) {
-    log('sys', `AT+CGNSSPWR=1 falhou (${res}) — variante sem receptor GNSS?`, 'err');
-    return;
+  if (alreadyOn) {
+    log('sys', 'GNSS já estava ligado — preservando o fix atual.', 'info');
+  } else {
+    // O waiter da URC é registrado ANTES do envio: '+CGNSSPWR: READY!' pode
+    // chegar no mesmo chunk serial do 'OK'.
+    const ready = waitFor(l => l.startsWith('+CGNSSPWR: READY'), 20000);
+
+    const res = await sendWait('AT+CGNSSPWR=1', 12000);
+    if (res && /ERROR/.test(res)) {
+      log('sys', `AT+CGNSSPWR=1 falhou (${res}) — variante sem receptor GNSS?`, 'err');
+      return;
+    }
+    // Configurar constelações antes do READY faz o módulo devolver ERROR.
+    if (!await ready) log('sys', 'Sem +CGNSSPWR: READY! em 20 s — o receptor pode não ter iniciado.', 'err');
   }
-
-  // Configurar constelações antes do READY faz o módulo devolver ERROR.
-  const gotReady = await ready;
-  if (!gotReady) log('sys', 'Sem +CGNSSPWR: READY! em 20 s — o receptor pode não ter iniciado.', 'err');
 
   const mode = document.getElementById('gnssModeSel')?.value;
   if (mode) {
-    const r = await sendWait(`AT+CGNSSMODE=${mode}`);
-    if (r && /ERROR/.test(r)) log('sys', `AT+CGNSSMODE=${mode} recusado (${r}).`, 'err');
+    const cur = await queryValue('AT+CGNSSMODE?', l => l.startsWith('+CGNSSMODE:'), 5000);
+    await waitOk(2000);
+    if (!cur || cur.replace(/\D/g, '') !== String(mode)) {
+      const r = await sendWait(`AT+CGNSSMODE=${mode}`);
+      if (r && /ERROR/.test(r)) log('sys', `AT+CGNSSMODE=${mode} recusado (${r}).`, 'err');
+    }
   }
 
-  // Garante que os dados parseados saiam pela porta em uso: com o roteamento
-  // errado o +CGNSSINFO volta vazio mesmo com fix 3D válido.
-  await sendWait(`AT+CGNSSPORTSWITCH=${gnssPortPair()}`);
+  // Roteamento errado faz o +CGNSSINFO voltar vazio mesmo com fix 3D válido.
+  const want = gnssPortPair();
+  const port = await queryValue('AT+CGNSSPORTSWITCH?', l => l.startsWith('+CGNSSPORTSWITCH:'), 5000);
+  await waitOk(2000);
+  if (!port || port.substring(port.indexOf(':') + 1).replace(/\s/g, '') !== want)
+    await sendWait(`AT+CGNSSPORTSWITCH=${want}`);
 
-  log('sys', 'GNSS ligado. Aguardando fix (30–90 s a frio).', 'info');
-  setTimeout(() => send('AT+CGNSSINFO'), 1500);
+  log('sys', alreadyOn ? 'GNSS ativo. Consultando posição...'
+                       : 'GNSS ligado. Aguardando fix (30–90 s a frio).', 'info');
+  startGnssPoll();
 }
 
 function gnssOff() {
@@ -3710,20 +3727,27 @@ async function nmeaStart() {
 
 function nmeaStop() { nmeaStreaming = false; send('AT+CGNSSTST=0'); }
 
-function toggleGnssPoll() {
+// Uma consulta única não basta: logo após ligar o receptor a resposta vem
+// vazia, e sem repetição o painel fica parado em "Buscando fix" para sempre.
+function startGnssPoll() {
+  if (gnssPollTimer) { send('AT+CGNSSINFO'); return; }
+  const s = parseInt(document.getElementById('gnssPollInterval')?.value, 10) || 2;
+  gnssPollTimer = setInterval(() => send('AT+CGNSSINFO'), s * 1000);
   const btn = document.getElementById('gnssPollBtn');
-  if (gnssPollTimer) {
-    clearInterval(gnssPollTimer); gnssPollTimer = null;
-    btn.textContent = 'ON';
-    log('sys', 'Poll de GNSS desativado.', 'info');
-  } else {
-    const s = parseInt(document.getElementById('gnssPollInterval').value, 10) || 2;
-    gnssPollTimer = setInterval(() => send('AT+CGNSSINFO'), s * 1000);
-    btn.textContent = 'OFF';
-    send('AT+CGNSSINFO');
-    log('sys', `Poll de GNSS a cada ${s}s.`, 'info');
-  }
+  if (btn) btn.textContent = 'OFF';
+  send('AT+CGNSSINFO');
+  log('sys', `Poll de GNSS a cada ${s}s.`, 'info');
 }
+
+function stopGnssPoll() {
+  if (!gnssPollTimer) return;
+  clearInterval(gnssPollTimer); gnssPollTimer = null;
+  const btn = document.getElementById('gnssPollBtn');
+  if (btn) btn.textContent = 'ON';
+  log('sys', 'Poll de GNSS desativado.', 'info');
+}
+
+function toggleGnssPoll() { gnssPollTimer ? stopGnssPoll() : startGnssPoll(); }
 
 function setGnssView(view) {
   const map = { decoded: 'gnss-view-decoded', raw: 'gnss-view-raw', nmea: 'gnss-view-nmea' };
