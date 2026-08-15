@@ -13,6 +13,7 @@
 static const int PIN_RX     = 16;   // ESP32 RX  <- TX do módulo
 static const int PIN_TX     = 17;   // ESP32 TX  -> RX do módulo
 static const int PIN_PWRKEY = 4;
+static const int PIN_STATUS = 5;    // -1 se o STATUS do módulo não estiver ligado
 
 // A placa Muz 24x24 inverte o PWRKEY com um transistor: o header é ativo em
 // ALTO. Ligando direto no pino do módulo, troque para false (ativo em BAIXO).
@@ -43,11 +44,13 @@ void setup() {
   modem.begin(Serial2, PIN_RX, PIN_TX, 115200);
   modem.setDebug(&Serial);
 
-  modem.powerOn(PIN_PWRKEY, PWRKEY_ACTIVE_HIGH);
-  Serial.println(F("PWRKEY pulsado. A UART leva ~8 s para responder."));
+  modem.setStatusPin(PIN_STATUS);
 
-  if (!modem.waitReady(20000)) {
-    Serial.println(F("Modulo nao respondeu. Verifique alimentacao (pico de 2 A) e TX/RX."));
+  // Nada de inicializar no escuro: sem o módulo ligado e respondendo, toda a
+  // sequência abaixo iria para o vazio e ainda pareceria ter dado certo.
+  if (!modem.ensurePowered(PIN_PWRKEY, PWRKEY_ACTIVE_HIGH)) {
+    Serial.println(F("Modulo sem resposta — inicializacao ABORTADA."));
+    Serial.println(F("Verifique: alimentacao 3,4-4,2 V com pico de 2 A, PWRKEY, TX/RX e GND comum."));
     return;
   }
 

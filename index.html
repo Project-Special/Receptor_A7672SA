@@ -1875,11 +1875,13 @@ async function connect() {
 
   if (connected && document.getElementById('autoInitChk')?.checked) {
     await delay(400);
-    await runInitSequence();
-    // GNSS não depende de SIM nem de rede, então entra sempre — é o subsistema
-    // que leva mais tempo para dar fix e vale começar cedo.
-    await delay(200);
-    await gnssOn();
+    // Se o módulo não respondeu, não adianta seguir para o GNSS.
+    if (await runInitSequence()) {
+      // GNSS não depende de SIM nem de rede, então entra sempre — é o
+      // subsistema que leva mais tempo para dar fix e vale começar cedo.
+      await delay(200);
+      await gnssOn();
+    }
   }
 }
 
@@ -3599,12 +3601,31 @@ function parseIdentity(line) {
 // AÇÕES — sequências e formulários
 // ============================================================
 async function runInitSequence() {
-  if (!requireConnection('sequência de inicialização')) return;
+  if (!requireConnection('sequência de inicialização')) return false;
+
+  // Porta aberta não significa módulo ligado: sem alimentação ou com PWRKEY
+  // sem pulso, a serial conecta e o módulo fica mudo. Sonda antes de gastar
+  // 13 comandos no vazio — e de anunciar sucesso que não houve.
+  setText('n-sim', 'verificando...');
+  const alive = await sendWait('AT', 3000);
+  if (!alive) {
+    log('sys', '⛔ Módulo não respondeu ao AT — inicialização cancelada.', 'err');
+    log('sys', 'Verifique alimentação (3,4–4,2 V com pico de 2 A), PWRKEY e se a porta é a AT (não a Diag).', 'info');
+    return false;
+  }
+
   log('sys', '⏳ Sequência de inicialização A7672SA...', 'info');
   const seq = ['AT', 'ATE1', 'AT+CMEE=2', 'AT+CPIN?', 'AT+CGMR', 'AT+CGSN', 'AT+CICCID',
                'AT+CFUN?', 'AT+CSQ', 'AT+CPSI?', 'AT+CEREG?', 'AT+CGATT?', 'AT+CGDCONT?'];
-  for (const c of seq) { await sendWait(c, 6000); await delay(80); }
-  log('sys', '✅ Inicialização concluída.', 'ok');
+
+  // Conta quem RESPONDEU, não quem devolveu OK: sem SIM o +CPIN? responde
+  // +CME ERROR legitimamente, e isso não é falha de comunicação.
+  let answered = 0;
+  for (const c of seq) { if (await sendWait(c, 6000)) answered++; await delay(80); }
+
+  if (answered === seq.length) { log('sys', '✅ Inicialização concluída.', 'ok'); return true; }
+  log('sys', `⚠️ Inicialização parcial: ${answered}/${seq.length} comandos responderam. O módulo pode ter reiniciado (fonte fraca).`, 'err');
+  return false;
 }
 
 function scanOperators() {

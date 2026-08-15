@@ -17,6 +17,35 @@ void A7672Core::powerOn(int pwrkeyPin, bool activeHigh, uint32_t pulseMs) {
   digitalWrite(pwrkeyPin, activeHigh ? LOW : HIGH);
 }
 
+void A7672Core::setStatusPin(int pin, bool activeHigh) {
+  _statusPin = pin;
+  _statusActiveHigh = activeHigh;
+  if (pin >= 0) pinMode(pin, INPUT);
+}
+
+bool A7672Core::isPoweredOn(uint32_t probeMs) {
+  // STATUS é a evidência direta: fica alto só após o boot completar e baixo o
+  // resto do tempo. Não depende da UART nem consome um comando.
+  if (_statusPin >= 0)
+    return digitalRead(_statusPin) == (_statusActiveHigh ? HIGH : LOW);
+
+  // Sem o STATUS ligado, a própria resposta ao AT responde por ele.
+  return at("AT", probeMs);
+}
+
+bool A7672Core::ensurePowered(int pwrkeyPin, bool activeHigh, uint32_t readyTimeoutMs) {
+  if (isPoweredOn()) {
+    // Pulsar o PWRKEY com o módulo já rodando é inócuo (desligar exige 2,5 s),
+    // mas custa os ~8 s de Ton(uart) à toa e reinicia o que já funcionava.
+    if (_dbg) _dbg->println(F("[PWR] modulo ja ligado"));
+    return waitReady(readyTimeoutMs);
+  }
+
+  if (_dbg) _dbg->println(F("[PWR] pulsando PWRKEY"));
+  powerOn(pwrkeyPin, activeHigh);
+  return waitReady(readyTimeoutMs);   // Ton(uart) do datasheet: ~8 s
+}
+
 bool A7672Core::waitReady(uint32_t timeoutMs) {
   uint32_t deadline = millis() + timeoutMs;
   while ((int32_t)(deadline - millis()) > 0) {

@@ -21,6 +21,17 @@ public:
   // ALTO. Depois do pulso a UART leva ~8 s para responder.
   void powerOn(int pwrkeyPin, bool activeHigh, uint32_t pulseMs = 60);
 
+  // Pino STATUS do módulo: alto só depois do boot completar. É a evidência
+  // direta de que o módulo está ligado, sem depender da UART.
+  void setStatusPin(int pin, bool activeHigh = true);
+
+  // Já está ligado? Usa o STATUS quando informado; senão sonda com AT.
+  bool isPoweredOn(uint32_t probeMs = 1500);
+
+  // Pulsa o PWRKEY apenas se necessário e espera a UART subir. false quando o
+  // módulo continua mudo — aí não adianta seguir para a inicialização.
+  bool ensurePowered(int pwrkeyPin, bool activeHigh, uint32_t readyTimeoutMs = 20000);
+
   // Manda AT até o módulo responder. Use após powerOn().
   bool waitReady(uint32_t timeoutMs = 15000);
 
@@ -68,6 +79,8 @@ private:
 
   HardwareSerial* _ser = nullptr;
   Stream* _dbg = nullptr;
+  int  _statusPin = -1;
+  bool _statusActiveHigh = true;
   String _buf;
   String _lastError;
   SimState _sim = SimState::Unknown;
