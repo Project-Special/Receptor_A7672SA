@@ -37,6 +37,11 @@ public:
   bool startNmea(int rateHz = 1);
   bool stopNmea();
 
+  // Roteamento de saída: 0 = USB, 1 = UART. O padrão 1,1 serve para quem fala
+  // com o módulo pela UART; usando a porta AT via USB, troque para 0,0.
+  void setPorts(int parsedPort, int nmeaPort) { _parsedPort = parsedPort; _nmeaPort = nmeaPort; }
+  bool setPortRouting();
+
   // Com o stream ligado, alimenta o fix a partir de RMC/GGA/GSA.
   const GnssFix& fix() const { return _fix; }
 
@@ -47,5 +52,7 @@ private:
 
   A7672Core& _c;
   GnssFix _fix;
+  int _parsedPort = 1;      // UART
+  int _nmeaPort   = 1;      // UART
   bool _urcHooked = false;
 };

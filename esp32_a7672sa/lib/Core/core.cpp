@@ -37,6 +37,19 @@ void A7672Core::writeRaw(const uint8_t* data, size_t len) {
   if (_ser) _ser->write(data, len);
 }
 
+size_t A7672Core::readRaw(uint8_t* data, size_t len, uint32_t timeoutMs) {
+  if (!_ser || !data || !len) return 0;
+
+  size_t received = 0;
+  uint32_t deadline = millis() + timeoutMs;
+  while (received < len && (int32_t)(deadline - millis()) > 0) {
+    while (_ser->available() && received < len)
+      data[received++] = (uint8_t)_ser->read();
+    if (received < len) delay(1);
+  }
+  return received;
+}
+
 // Lê até '\n'. Descarta linhas vazias. O prompt '>' vem sem quebra de linha,
 // então é reconhecido assim que o buffer o contém e nada mais chega.
 bool A7672Core::readLine(String& out, uint32_t timeoutMs) {

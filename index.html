@@ -638,7 +638,7 @@
   <button class="conn-btn connect" id="connectBtn" onclick="toggleConnect()">Conectar</button>
   <button class="conn-btn" id="detectBtn" style="background:var(--surface2);border:1px solid var(--border);color:var(--text-dim);" onclick="requestPorts()">🔍 Detectar Portas</button>
   <label class="conn-label" style="display:flex;align-items:center;gap:5px;cursor:pointer;" title="Executa a sequência de inicialização assim que conectar">
-    <input type="checkbox" id="autoInitChk" checked style="accent-color:var(--accent);" /> Auto-init
+    <input type="checkbox" id="autoInitChk" checked style="accent-color:var(--accent);" /> Auto-init + GNSS
   </label>
   <span class="conn-label" id="connInfo" style="margin-left:auto;"></span>
 </div>
@@ -1154,6 +1154,18 @@
                 <option value="7">Todas</option>
               </select>
               <button class="conn-btn connect" style="padding:3px 10px;font-size:11px;" onclick="applyGnssMode()">Aplicar</button>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:4px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;"
+                 title="Roteamento de saída do GNSS. O 1º parâmetro é a porta dos dados parseados (+CGNSSINFO), o 2º é a do NMEA. Se não casarem com a porta que você está usando, a resposta sai pela outra e chega vazia.">
+              <span style="font-size:11px;color:var(--text-dim);">Saída:</span>
+              <select id="gnssPortSel" style="background:transparent;border:none;color:var(--text);font-size:12px;outline:none;">
+                <option value="1,1" selected>Tudo na UART (1,1)</option>
+                <option value="0,0">Tudo na USB (0,0)</option>
+                <option value="0,1">Parseado USB · NMEA UART (0,1)</option>
+                <option value="1,0">Parseado UART · NMEA USB (1,0)</option>
+              </select>
+              <button class="conn-btn connect" style="padding:3px 10px;font-size:11px;" onclick="applyGnssPort()">Aplicar</button>
             </div>
 
             <div style="display:flex;align-items:center;gap:4px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;">
@@ -1863,7 +1875,11 @@ async function connect() {
 
   if (connected && document.getElementById('autoInitChk')?.checked) {
     await delay(400);
-    runInitSequence();
+    await runInitSequence();
+    // GNSS não depende de SIM nem de rede, então entra sempre — é o subsistema
+    // que leva mais tempo para dar fix e vale começar cedo.
+    await delay(200);
+    await gnssOn();
   }
 }
 
@@ -3591,6 +3607,10 @@ async function gnssOn() {
     if (r && /ERROR/.test(r)) log('sys', `AT+CGNSSMODE=${mode} recusado (${r}).`, 'err');
   }
 
+  // Garante que os dados parseados saiam pela porta em uso: com o roteamento
+  // errado o +CGNSSINFO volta vazio mesmo com fix 3D válido.
+  await sendWait(`AT+CGNSSPORTSWITCH=${gnssPortPair()}`);
+
   log('sys', 'GNSS ligado. Aguardando fix (30–90 s a frio).', 'info');
   setTimeout(() => send('AT+CGNSSINFO'), 1500);
 }
@@ -3602,12 +3622,17 @@ function gnssOff() {
 
 function applyGnssMode() { send(`AT+CGNSSMODE=${document.getElementById('gnssModeSel').value}`); }
 
+function gnssPortPair() { return document.getElementById('gnssPortSel')?.value || '1,1'; }
+function applyGnssPort() { send(`AT+CGNSSPORTSWITCH=${gnssPortPair()}`); }
+
 async function nmeaStart() {
   if (!requireConnection('stream NMEA')) return;
   nmeaStreaming = true;
   setGnssView('nmea');
   // Sem o PORTSWITCH o NMEA sai pela porta dedicada e nunca aparece aqui.
-  await sendWait('AT+CGNSSPORTSWITCH=0,1');
+  // O 1º parâmetro é a porta dos dados PARSEADOS (+CGNSSINFO): mandá-lo para a
+  // porta errada faz o +CGNSSINFO responder vazio mesmo com fix válido.
+  await sendWait(`AT+CGNSSPORTSWITCH=${gnssPortPair()}`);
   await sendWait('AT+CGNSSNMEA=1,1,1,1,1,0,0,0');
   await sendWait('AT+CGPSNMEARATE=1');
   const r = await sendWait('AT+CGNSSTST=1');

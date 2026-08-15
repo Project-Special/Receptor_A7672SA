@@ -74,8 +74,8 @@ HttpResponse A7672Http::request(int method, const String& url,
 }
 
 // O módulo anuncia o tamanho em '+HTTPREAD: <n>' e envia exatamente n bytes.
-// Contamos bytes em vez de procurar um 'OK' terminador: esse 'OK' tanto pode
-// fazer parte do payload quanto ser a resposta de outro comando.
+// O corpo é lido cru: readLine() descartaria CR/LF, linhas vazias e bytes NUL.
+// Só o OK que vem *depois* desses n bytes é resposta AT.
 bool A7672Http::readBody(size_t total, String& out) {
   out = "";
   out.reserve(total + 16);
@@ -101,13 +101,14 @@ bool A7672Http::readBody(size_t total, String& out) {
     }
     if (remaining < 0) return false;
 
-    // Corpo do bloco, por contagem de bytes.
-    while (remaining > 0 && (int32_t)(deadline - millis()) > 0) {
-      if (!_c.readLine(line, 300)) continue;
-      if (line.startsWith("+HTTPREAD:")) break;          // '+HTTPREAD: 0' fecha o bloco
-      if (out.length()) out += "\n";
-      out += line;
-      remaining -= (long)line.length() + 1;              // +1 pelo \n descartado
+    // Corpo do bloco, por contagem de bytes (não por linhas).
+    while (remaining > 0) {
+      uint8_t buffer[128];
+      size_t want = remaining > (long)sizeof(buffer) ? sizeof(buffer) : (size_t)remaining;
+      size_t got = _c.readRaw(buffer, want, 15000);
+      if (got != want) return false;
+      if (!out.concat((const char*)buffer, got)) return false;
+      remaining -= got;
     }
 
     offset += size;

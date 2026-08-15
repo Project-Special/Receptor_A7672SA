@@ -40,6 +40,10 @@ public:
   void write(const String& s);
   void writeRaw(const uint8_t* data, size_t len);
 
+  // Lê exatamente até `len` bytes crus da UART. Diferente de readLine(), não
+  // descarta CR/LF nem interpreta o conteúdo; necessário para AT+HTTPREAD.
+  size_t readRaw(uint8_t* data, size_t len, uint32_t timeoutMs);
+
   // Drena a UART e despacha URCs. Chame no loop() quando não houver
   // comando em andamento, senão as URCs só aparecem no próximo comando.
   void pump(uint32_t forMs = 0);

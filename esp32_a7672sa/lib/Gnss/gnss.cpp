@@ -38,6 +38,7 @@ bool A7672Gnss::powerOn(int mode, uint32_t readyTimeoutMs) {
   if (!_c.waitToken("+CGNSSPWR: READY", readyTimeoutMs)) return false;
 
   _c.at("AT+CGNSSMODE=" + String(mode));
+  setPortRouting();                 // sem isto o +CGNSSINFO pode vir vazio
   return true;
 }
 
@@ -79,10 +80,17 @@ bool A7672Gnss::readFix(GnssFix& out) {
 }
 
 bool A7672Gnss::startNmea(int rateHz) {
-  if (!_c.at("AT+CGNSSPORTSWITCH=0,1")) return false;   // NMEA na porta AT
+  if (!setPortRouting()) return false;
   _c.at("AT+CGNSSNMEA=1,1,1,1,1,0,0,0");
   _c.at("AT+CGPSNMEARATE=" + String(rateHz));
   return _c.at("AT+CGNSSTST=1");
+}
+
+// AT+CGNSSPORTSWITCH=<porta_dados_parseados>,<porta_nmea>, onde 0 = USB e
+// 1 = UART. Rotear os dados parseados para a porta errada faz o +CGNSSINFO
+// responder vazio mesmo com fix 3D válido — o dado sai pela outra porta.
+bool A7672Gnss::setPortRouting() {
+  return _c.at("AT+CGNSSPORTSWITCH=" + String(_parsedPort) + "," + String(_nmeaPort));
 }
 
 bool A7672Gnss::stopNmea() { return _c.at("AT+CGNSSTST=0"); }
