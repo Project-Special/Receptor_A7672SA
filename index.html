@@ -214,6 +214,7 @@
     #panel-map { position: relative; width: 100%; height: 100%; padding: 0; }
     /* a barra em si não captura cliques (deixa arrastar o mapa); os botões sim */
     #map-controls .action-btn { pointer-events: auto; align-self: auto; width: auto; }
+    #map-controls .mi { margin-right: 6px; }
     #map-wrapper { position: absolute; inset: 0; overflow: hidden; }
     #leaflet-map { width: 100%; height: 100%; background: #0a0e14; }
 
@@ -635,13 +636,22 @@
          estreitos ao lado de campos de largura total. */
       .form-row .form-group { max-width: none !important; }
 
-      /* Centralizado com nowrap, a barra do mapa era cortada dos dois lados. */
-      #map-infobar { left: 8px; right: 8px; transform: none;
-                     white-space: normal; flex-wrap: wrap; justify-content: center; }
+      /* Centralizado com nowrap, a barra do mapa era cortada dos dois lados.
+         Compactada, cabe em uma linha em vez de três sobre o mapa. */
+      #map-infobar { left: 8px; right: 8px; top: 8px !important; transform: none;
+                     white-space: normal; flex-wrap: wrap; justify-content: center;
+                     gap: 10px !important; padding: 4px 10px !important; font-size: 11px !important; }
+      /* HDOP já aparece no painel GNSS; fora daqui a barra cabe em uma linha. */
+      #map-hdop { display: none; }
 
-      /* Cinco botões de largura cheia ocupavam 3 linhas sobre o mapa. */
-      #map-controls { gap: 6px; padding: 8px; }
-      #map-controls .action-btn { padding: 10px 12px; font-size: 12px; min-height: 44px; }
+      /* Cinco botões com rótulo ocupavam 3 linhas EM CIMA do mapa. Só os
+         ícones, numa única linha rente à borda, tapam ~44px em vez de 112. */
+      #map-controls { gap: 6px; padding: 0 !important; flex-wrap: nowrap !important;
+                      bottom: 10px !important; left: 8px !important; right: 8px !important; }
+      #map-controls .action-btn { flex: 1 1 0; min-width: 0; min-height: 44px;
+                                  padding: 10px 0; font-size: 17px; text-align: center; }
+      #map-controls .mi { margin-right: 0; }
+      #map-controls .ml { display: none; }
     }
 
     @media (max-width: 380px) {
@@ -1360,12 +1370,15 @@
           <div id="map-controls" style="
             position:absolute;bottom:14px;left:12px;right:12px;
             z-index:1000;display:flex;gap:8px;flex-wrap:wrap;justify-content:center;pointer-events:none;">
-            <button class="action-btn secondary" onclick="showTab('gnss')">← GNSS</button>
+            <!-- O rótulo .ml some no celular; só o ícone fica, para os botões
+                 não taparem o mapa. O aria-label mantém o significado. -->
+            <button class="action-btn secondary" onclick="showTab('gnss')" aria-label="Voltar ao painel GNSS"><span class="mi">←</span><span class="ml">GNSS</span></button>
             <button class="action-btn" onclick="mapFollowToggle()" id="mapFollowBtn"
-                    title="Recentrando a cada posição. Arraste o mapa ou clique para soltar.">📍 Seguindo GPS</button>
-            <button class="action-btn secondary" onclick="mapClearTrack()">🗑️ Limpar rastro</button>
-            <button class="action-btn secondary" onclick="mapFitTrack()">🔲 Ver tudo</button>
-            <button class="action-btn secondary" onclick="exportGpx()">⬇ GPX</button>
+                    title="Recentrando a cada posição. Arraste o mapa ou clique para soltar."
+                    aria-label="Seguir GPS"><span class="mi">📍</span><span class="ml">Seguindo GPS</span></button>
+            <button class="action-btn secondary" onclick="mapClearTrack()" aria-label="Limpar rastro"><span class="mi">🗑️</span><span class="ml">Limpar rastro</span></button>
+            <button class="action-btn secondary" onclick="mapFitTrack()" aria-label="Enquadrar todo o rastro"><span class="mi">🔲</span><span class="ml">Ver tudo</span></button>
+            <button class="action-btn secondary" onclick="exportGpx()" aria-label="Exportar GPX"><span class="mi">⬇</span><span class="ml">GPX</span></button>
           </div>
 
           <div id="leaflet-map"></div>
@@ -4513,7 +4526,13 @@ function setMapFollow(on, porArraste) {
   if (btn) {
     // O rótulo mostra o ESTADO atual, não a ação: "Seguir" sozinho parecia um
     // botão a clicar, e ninguém descobria que o mapa já podia ser solto.
-    btn.textContent = on ? '📍 Seguindo GPS' : '🖐️ Mapa livre';
+    // Escrever em textContent apagaria os spans .mi/.ml, que o modo celular
+    // usa para exibir só o ícone.
+    const mi = btn.querySelector('.mi'), ml = btn.querySelector('.ml');
+    if (mi) mi.textContent = on ? '📍' : '🖐️';
+    if (ml) ml.textContent = on ? 'Seguindo GPS' : 'Mapa livre';
+    btn.setAttribute('aria-label', on ? 'Seguindo GPS — clique para soltar o mapa'
+                                      : 'Mapa livre — clique para voltar a seguir');
     btn.classList.toggle('secondary', !on);
     btn.title = on ? 'Recentrando a cada posição. Arraste o mapa ou clique para soltar.'
                    : 'Mapa livre: arraste à vontade. Clique para voltar a seguir o GPS.';
