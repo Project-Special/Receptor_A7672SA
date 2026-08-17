@@ -544,11 +544,16 @@
 
     .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 99; }
 
+    /* Só faz sentido no mobile, onde a barra de conexão disputa a tela. */
+    .conn-toggle { display: none; }
+
     /* ── MOBILE ────────────────────────────────── */
     @media (max-width: 768px) {
       body { font-size: 15px; }
       .menu-toggle { display: block; }
-      header h1 { font-size: 14px; }
+      /* Com o botão da barra de conexão, o título quebrava em duas linhas e
+         engordava o cabeçalho. */
+      header h1 { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       header .subtitle { display: none; }
 
       .sidebar {
@@ -563,11 +568,23 @@
       .sidebar.open { transform: translateX(0); }
       .sidebar-overlay.open { display: block; }
 
-      .conn-bar { flex-direction: column; align-items: flex-start; gap: 8px; padding: 10px 12px; }
-      .conn-bar > * { width: 100%; }
+      /* Empilhada em coluna, a barra de conexão comia ~700px de altura e não
+         sobrava tela para o terminal nem para o mapa. Em grade de 2 colunas,
+         sem os rótulos (que o próprio controle já anuncia), cai para ~200px. */
+      .conn-bar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px 12px; align-items: center; }
+      .conn-bar > * { width: auto; }
+      .conn-bar span.conn-label:not(#connInfo) { display: none; }
+      .conn-bar #connMode,
+      .conn-bar #wsUrlInput,
+      .conn-bar label.conn-label,
+      .conn-bar #connInfo { grid-column: 1 / -1; }
       .conn-bar select,
       .conn-bar input[type=text],
       .conn-bar input[type=number] { width: 100% !important; font-size: 15px; padding: 8px 12px; }
+      #connInfo { margin-left: 0 !important; font-size: 12px; }
+
+      .conn-toggle { display: block; }
+      body.connbar-off .conn-bar { display: none; }
       .conn-btn { width: 100%; padding: 10px 14px; font-size: 14px; }
       #connInfo { margin-left: 0 !important; }
 
@@ -621,6 +638,10 @@
       /* Centralizado com nowrap, a barra do mapa era cortada dos dois lados. */
       #map-infobar { left: 8px; right: 8px; transform: none;
                      white-space: normal; flex-wrap: wrap; justify-content: center; }
+
+      /* Cinco botões de largura cheia ocupavam 3 linhas sobre o mapa. */
+      #map-controls { gap: 6px; padding: 8px; }
+      #map-controls .action-btn { padding: 10px 12px; font-size: 12px; min-height: 44px; }
     }
 
     @media (max-width: 380px) {
@@ -639,6 +660,8 @@
 
 <header>
   <button class="menu-toggle" onclick="toggleSidebar()" aria-label="Menu">☰</button>
+  <button class="menu-toggle conn-toggle" onclick="toggleConnBar()" id="connBarBtn"
+          aria-label="Mostrar/ocultar conexão" title="Mostra ou esconde a barra de conexão">🔌</button>
   <span style="font-size:20px;">📶</span>
   <h1>A7672SA Controller</h1>
   <span class="subtitle">SIMCom A76XX · LTE Cat.1 · GNSS</span>
@@ -1884,10 +1907,17 @@ function getConnMode() {
   return sel ? sel.value : 'serial';
 }
 
+// O Chrome Android expõe navigator.serial em algumas versões, mas o
+// requestPort() sempre falha — a API é de desktop. Checar só a presença do
+// objeto deixava a Serial selecionável num beco sem saída no celular.
+function serialUsable() {
+  return ('serial' in navigator) && !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
 async function requestPorts() {
   const mode = getConnMode();
   if (mode === 'websocket') { wsListPorts(); return; }
-  if (!('serial' in navigator)) { log('sys', 'Web Serial API não suportada. Use Chrome/Edge/Opera.', 'err'); return; }
+  if (!serialUsable()) { log('sys', 'Web Serial indisponível neste navegador. Use o bridge WebSocket ou o Simulador.', 'err'); return; }
   try {
     const p = await navigator.serial.requestPort();
     const info = p.getInfo();
@@ -1924,7 +1954,7 @@ async function connect() {
 }
 
 async function connectSerial() {
-  if (!('serial' in navigator)) {
+  if (!serialUsable()) {
     log('sys', '⚠️ Web Serial API indisponível neste navegador (use Chrome/Edge no desktop).', 'err');
     log('sys', 'Para testar a interface sem hardware, escolha "Simulador" em Interface.', 'info');
     setStatus('disconnected');
@@ -2321,6 +2351,7 @@ function setStatus(state) {
     btn.className = 'conn-btn connect'; btn.disabled = false;
   }
   setCommandsEnabled(state === 'connected');
+  autoHideConnBar(state === 'connected');
 }
 
 // Trava os botões de comando AT enquanto não há transporte ativo
@@ -4541,6 +4572,17 @@ function showTab(name, el) {
 
 function toggleSection(id) { document.getElementById(id)?.classList.toggle('collapsed'); }
 
+// No celular a barra de conexão só interessa antes de conectar; depois ela é
+// espaço morto disputando tela com o terminal e o mapa.
+function toggleConnBar() {
+  document.body.classList.toggle('connbar-off');
+}
+
+function autoHideConnBar(on) {
+  if (window.innerWidth > 768) return;
+  document.body.classList.toggle('connbar-off', on);
+}
+
 function toggleSidebar() {
   const sidebar = document.querySelector('.sidebar');
   const overlay = document.getElementById('sidebarOverlay');
@@ -4578,7 +4620,7 @@ window.addEventListener('load', () => {
   log('sys', 'Nenhum comando é enviado enquanto não houver conexão ativa.', 'info');
   log('sys', 'Sem hardware? Escolha "Simulador (sem hardware)" em Interface e clique em Conectar.', 'info');
 
-  if (!('serial' in navigator)) {
+  if (!serialUsable()) {
     // Chrome Android não implementa Web Serial. Deixar "Serial" selecionado
     // dava um beco sem saída: o botão Conectar ficava ativo e só imprimia
     // erro. Desabilita a opção e cai no bridge, que é o caminho viável.
