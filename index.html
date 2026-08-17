@@ -2,7 +2,9 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- interactive-widget: sem isto, o teclado do Android cobre a barra de
+       comando em vez de encolher o layout. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
   <title>A7672SA Controller</title>
   <meta name="theme-color" content="#3b82f6" />
   <meta name="mobile-web-app-capable" content="yes" />
@@ -41,7 +43,10 @@
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       font-size: 14px;
+      /* 100dvh acompanha a barra de endereço do Chrome Android; o 100vh
+         fica como reserva para navegadores sem suporte. */
       height: 100vh;
+      height: 100dvh;
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -583,19 +588,47 @@
       .action-btn { width: 100%; text-align: center; padding: 11px 20px; }
       .form-row { flex-direction: column; }
 
-      .input-bar { padding: 8px 10px; gap: 6px; }
-      .input-bar input { font-size: 15px; padding: 10px 12px; }
-      .send-btn { padding: 10px 16px; font-size: 14px; }
-      .clear-btn { padding: 10px 12px; font-size: 14px; }
+      /* A barra de comando tem 7 itens somando ~695px de min-content. Sem
+         quebra de linha, tudo depois de "Enviar" fica fora da tela e o
+         .panel{overflow:hidden} recorta sem deixar rolar até lá. */
+      .input-bar { padding: 8px 10px; gap: 6px; flex-wrap: wrap; }
+      .input-bar input { flex: 1 0 100%; min-width: 0; font-size: 15px; padding: 10px 12px; }
+      .send-btn { flex: 1 1 auto; padding: 10px 16px; font-size: 14px; }
+      .clear-btn { flex: 1 1 auto; padding: 10px 12px; font-size: 14px; }
 
       .pane { padding: 12px; gap: 10px; }
       .grid-2, .grid-3 { grid-template-columns: 1fr !important; }
+
+      /* ── Alvos de toque: mínimo de 44px ──────────────────── */
+      .menu-toggle { min-width: 44px; min-height: 44px; }
+      .conn-bar select, .conn-bar input[type=text] { min-height: 44px; }
+      .cmd-btn { min-height: 44px; }
+      .tab { min-height: 44px; display: flex; align-items: center; }
+      .view-toggle { min-height: 44px; padding: 10px 14px; }
+      .conn-btn, .send-btn, .clear-btn { min-height: 44px; }
+      .btn-row select, .btn-row .conn-btn { min-height: 44px; font-size: 14px; padding: 8px 12px; }
+      input[type=checkbox] { width: 22px; height: 22px; flex-shrink: 0; }
+      label.conn-label { min-height: 44px; }
+
+      /* Grupos inline (Constelações / Saída / Poll) ficam no limite dos
+         360px; em largura total eles respiram e o alvo cresce junto. */
+      .btn-row > div[style*="display:flex"] { width: 100%; justify-content: space-between; }
+
+      /* max-width inline sobrevive ao empilhamento e deixa metade dos campos
+         estreitos ao lado de campos de largura total. */
+      .form-row .form-group { max-width: none !important; }
+
+      /* Centralizado com nowrap, a barra do mapa era cortada dos dois lados. */
+      #map-infobar { left: 8px; right: 8px; transform: none;
+                     white-space: normal; flex-wrap: wrap; justify-content: center; }
     }
 
     @media (max-width: 380px) {
       .info-grid { grid-template-columns: 1fr 1fr; }
       .tabs { gap: 4px; }
-      .tab { padding: 9px 12px; font-size: 13px; }
+      /* Só o padding lateral encolhe: reduzir a altura derrubaria a aba
+         abaixo dos 44px e errar o toque rola a faixa em vez de trocar. */
+      .tab { padding: 9px 12px; font-size: 13px; min-height: 44px; }
     }
 
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -1440,7 +1473,7 @@
             </label>
           </div>
 
-          <div class="info-grid" style="grid-template-columns:repeat(4,minmax(130px,1fr));">
+          <div class="info-grid">
             <div class="info-card"><div class="card-label">Estado</div><div class="card-value" id="http-state" style="font-size:15px;">Ocioso</div></div>
             <div class="info-card"><div class="card-label">Método</div><div class="card-value" id="http-method" style="font-size:15px;">GET</div></div>
             <div class="info-card"><div class="card-label">Status HTTP</div><div class="card-value" id="http-status" style="font-size:15px;">--</div></div>
@@ -1510,7 +1543,7 @@
             <button class="action-btn secondary" onclick="mqttPublishGnss()">📍 Publicar posição</button>
           </div>
 
-          <div class="info-grid" style="grid-template-columns:repeat(4,minmax(130px,1fr));">
+          <div class="info-grid">
             <div class="info-card"><div class="card-label">Serviço</div><div class="card-value" id="mq-svc" style="font-size:15px;">Parado</div></div>
             <div class="info-card"><div class="card-label">Cliente</div><div class="card-value" id="mq-client" style="font-size:15px;">--</div></div>
             <div class="info-card"><div class="card-label">Conexão</div><div class="card-value" id="mq-conn" style="font-size:15px;">Desconectado</div></div>
@@ -1564,7 +1597,7 @@
             <button class="action-btn secondary" onclick="send('AT+CIPRXGET=1')">RX manual ON</button>
           </div>
 
-          <div class="info-grid" style="grid-template-columns:repeat(4,minmax(130px,1fr));">
+          <div class="info-grid">
             <div class="info-card"><div class="card-label">Rede</div><div class="card-value" id="tcp-net" style="font-size:15px;">Fechada</div></div>
             <div class="info-card"><div class="card-label">IP local</div><div class="card-value" id="tcp-ip" style="font-size:14px;">--</div></div>
             <div class="info-card"><div class="card-label">Socket</div><div class="card-value" id="tcp-sock" style="font-size:15px;">--</div></div>
@@ -4546,7 +4579,16 @@ window.addEventListener('load', () => {
   log('sys', 'Sem hardware? Escolha "Simulador (sem hardware)" em Interface e clique em Conectar.', 'info');
 
   if (!('serial' in navigator)) {
+    // Chrome Android não implementa Web Serial. Deixar "Serial" selecionado
+    // dava um beco sem saída: o botão Conectar ficava ativo e só imprimia
+    // erro. Desabilita a opção e cai no bridge, que é o caminho viável.
+    const sel = document.getElementById('connMode');
+    const optSerial = sel?.querySelector('option[value="serial"]');
+    if (optSerial) { optSerial.disabled = true; optSerial.textContent = 'Serial (indisponível neste navegador)'; }
+    if (sel && sel.value === 'serial') { sel.value = 'websocket'; onConnModeChange(); }
+
     log('sys', '⚠️ Web Serial indisponível neste navegador (use Chrome/Edge no desktop).', 'err');
+    log('sys', 'Alternado para WebSocket Bridge. No celular, rode o a7672_bridge.py num PC da mesma rede e informe ws://IP:8765 — ou escolha o Simulador.', 'info');
   }
 
   document.querySelectorAll('.cmd-btn').forEach(btn => {
