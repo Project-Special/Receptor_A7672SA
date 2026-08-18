@@ -1580,7 +1580,7 @@
             </div>
             <div class="form-group" style="max-width:150px;">
               <label>Intervalo (s)</label>
-              <input id="fbInterval" type="number" min="5" value="30" />
+              <input id="fbInterval" type="number" min="5" value="30" onchange="firebaseIntervalChanged()" />
             </div>
             <div class="form-group" style="max-width:210px;">
               <label>Histórico</label>
@@ -4480,14 +4480,19 @@ async function firebaseSendNow() {
   }
 }
 
-// Chamado a cada fix novo. Com o envio automático ligado, respeita o intervalo
-// configurado em vez de mandar a cada quadro do GNSS.
-function firebaseOnFix() {
-  if (!fbTimer || fbBusy) return;
+// Único ponto que decide se está na hora de enviar. O intervalo é relido a
+// cada tique, então mudá-lo no campo passa a valer na hora — antes o valor
+// ficava congelado no setInterval criado lá no start.
+function fbTick() {
+  if (!fbTimer || fbBusy || !lastFix) return;
   const c = firebaseCfg();
   if (Date.now() - fbStats.lastSentAt < c.interval * 1000) return;
   firebaseSendNow();
 }
+
+// Chamado a cada fix novo, só para não esperar o próximo tique quando a
+// posição chega logo depois de o intervalo vencer.
+function firebaseOnFix() { fbTick(); }
 
 async function firebaseTestConnection() {
   const c = firebaseCfg();
@@ -4519,11 +4524,10 @@ function firebaseStart() {
   if (!c.host || !c.key) { alert('Preencha o host do banco e a Web API Key.'); return; }
   firebaseSaveCfg();
 
-  // Um timer próprio cobre o caso de o GNSS parar de emitir: sem ele o envio
-  // dependeria só da chegada de fixes novos e morreria em silêncio.
-  fbTimer = setInterval(() => {
-    if (lastFix) firebaseSendNow();
-  }, c.interval * 1000);
+  // O tique é curto de propósito: quem decide a hora do envio é o fbTick(),
+  // comparando o relógio com o intervalo lido na hora. Um setInterval do
+  // tamanho do intervalo congelaria o valor escolhido no start.
+  fbTimer = setInterval(fbTick, 1000);
 
   setText('fb-state', 'Enviando');
   document.getElementById('fbToggleBtn').textContent = '⏹️ Parar envio';
@@ -4543,6 +4547,14 @@ function firebaseStop() {
 function firebaseToggle() {
   if (fbTimer) { firebaseStop(); fbLog('Envio automático parado.', 'warn'); }
   else firebaseStart();
+}
+
+// Vale na hora, sem precisar parar e reiniciar o envio.
+function firebaseIntervalChanged() {
+  const c = firebaseCfg();
+  document.getElementById('fbInterval').value = c.interval;
+  firebaseSaveCfg();
+  if (fbTimer) fbLog(`Intervalo agora é ${c.interval}s.`, 'ok');
 }
 
 // ── MQTT ──────────────────────────────────────────────────────
