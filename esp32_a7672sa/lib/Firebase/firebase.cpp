@@ -1,0 +1,184 @@
+#include "firebase.h"
+
+static const char* kAuthHost    = "identitytoolkit.googleapis.com";
+static const char* kRefreshHost = "securetoken.googleapis.com";
+static const char* kNvsSpace    = "fbauth";
+static const char* kNvsRefresh  = "refresh";
+
+// Extrator mínimo para os campos que interessam: o JSON do Firebase Auth vem
+// com ~900 caracteres só de token, e uma lib de JSON completa custaria mais RAM
+// do que o ganho — aqui basta achar "chave":"valor".
+String A7672Firebase::jsonString(const String& src, const String& key) {
+  String needle = "\"" + key + "\"";
+  int k = src.indexOf(needle);
+  if (k < 0) return "";
+  int colon = src.indexOf(':', k + needle.length());
+  if (colon < 0) return "";
+  int q1 = src.indexOf('"', colon + 1);
+  if (q1 < 0) return "";
+  int q2 = src.indexOf('"', q1 + 1);
+  if (q2 < 0) return "";
+  return src.substring(q1 + 1, q2);
+}
+
+String A7672Firebase::isoTimestamp(const String& utcDate, const String& utcTime) {
+  // ddmmyy / hhmmss(.s) — sem data o satélite ainda não entregou o quadro certo.
+  if (utcDate.length() < 6 || utcTime.length() < 6) return "";
+
+  String dd = utcDate.substring(0, 2);
+  String mm = utcDate.substring(2, 4);
+  String yy = utcDate.substring(4, 6);
+  String hh = utcTime.substring(0, 2);
+  String mi = utcTime.substring(2, 4);
+  String ss = utcTime.substring(4, 6);
+
+  return "20" + yy + "-" + mm + "-" + dd + "T" + hh + ":" + mi + ":" + ss + "Z";
+}
+
+void A7672Firebase::begin(const String& apiKey, const String& dbHost, const String& deviceId) {
+  _apiKey = apiKey;
+  _dbHost = dbHost;
+  _deviceId = deviceId;
+
+  Preferences p;
+  if (p.begin(kNvsSpace, true)) {
+    _refreshToken = p.getString(kNvsRefresh, "");
+    p.end();
+  }
+}
+
+void A7672Firebase::forgetIdentity() {
+  _idToken = "";
+  _refreshToken = "";
+  _tokenExpiresAt = 0;
+  Preferences p;
+  if (p.begin(kNvsSpace, false)) {
+    p.remove(kNvsRefresh);
+    p.end();
+  }
+}
+
+void A7672Firebase::storeTokens(const String& idToken, const String& refreshToken, long expiresIn) {
+  _idToken = idToken;
+  if (expiresIn <= 0) expiresIn = 3600;
+  _tokenExpiresAt = millis() + (uint32_t)expiresIn * 1000UL;
+
+  if (refreshToken.length() && refreshToken != _refreshToken) {
+    _refreshToken = refreshToken;
+    Preferences p;
+    if (p.begin(kNvsSpace, false)) {
+      p.putString(kNvsRefresh, _refreshToken);
+      p.end();
+    }
+  }
+}
+
+bool A7672Firebase::signUpAnonymous() {
+  TlsResponse r = _t.request("POST", kAuthHost,
+                             "/v1/accounts:signUp?key=" + _apiKey,
+                             "{\"returnSecureToken\":true}",
+                             "application/json");
+  if (!r.ok) {
+    _lastError = "signUp falhou: HTTP " + String(r.status) + " " + r.body.substring(0, 120);
+    return false;
+  }
+
+  String id = jsonString(r.body, "idToken");
+  if (id.isEmpty()) {
+    _lastError = "signUp sem idToken na resposta";
+    return false;
+  }
+  storeTokens(id, jsonString(r.body, "refreshToken"), jsonString(r.body, "expiresIn").toInt());
+  _lastError = "";
+  return true;
+}
+
+bool A7672Firebase::refreshIdToken() {
+  if (_refreshToken.isEmpty()) return false;
+
+  // Este endpoint é form-urlencoded, não JSON, e responde em snake_case.
+  TlsResponse r = _t.request("POST", kRefreshHost, "/v1/token?key=" + _apiKey,
+                             "grant_type=refresh_token&refresh_token=" + _refreshToken,
+                             "application/x-www-form-urlencoded");
+  if (!r.ok) {
+    _lastError = "refresh falhou: HTTP " + String(r.status) + " " + r.body.substring(0, 120);
+    return false;
+  }
+
+  String id = jsonString(r.body, "id_token");
+  if (id.isEmpty()) return false;
+
+  storeTokens(id, jsonString(r.body, "refresh_token"), jsonString(r.body, "expires_in").toInt());
+  _lastError = "";
+  return true;
+}
+
+bool A7672Firebase::ensureAuth() {
+  if (_apiKey.isEmpty() || _dbHost.isEmpty()) {
+    _lastError = "Firebase nao configurado (apiKey/dbHost)";
+    return false;
+  }
+
+  // Renova com folga: token que vence no meio de um envio é erro 401 à toa.
+  if (_idToken.length() && (int32_t)(_tokenExpiresAt - millis()) > 5 * 60 * 1000L)
+    return true;
+
+  // Reaproveitar a identidade mantém o mesmo UID entre reinícios; só quando o
+  // refresh é recusado (revogado, projeto trocado) vale criar outro usuário.
+  if (refreshIdToken()) return true;
+
+  return signUpAnonymous();
+}
+
+bool A7672Firebase::put(const String& path, const String& json, const String& method) {
+  // O token vai no header porque é o único lugar sem limite de tamanho neste
+  // caminho — ver o comentário de lib/Tls/tls.h.
+  String headers = "Authorization: Bearer " + _idToken + "\r\n";
+
+  TlsResponse r = _t.request(method, _dbHost, path, json, "application/json", headers);
+  if (!r.ok) {
+    _lastError = method + " " + path + " -> HTTP " + String(r.status) + " " + r.body.substring(0, 120);
+    // 401 costuma ser token vencido: descarta para o próximo ciclo renovar.
+    if (r.status == 401) _idToken = "";
+    return false;
+  }
+  return true;
+}
+
+// "2026-08-18T13:45:02Z" -> "2026-08-18". Sem data do satélite os pontos vão
+// para um nó à parte em vez de se perderem ou contaminarem um dia real: isso
+// acontece nos primeiros quadros NMEA, quando já há posição mas ainda não veio
+// o RMC com a data.
+String A7672Firebase::dayKey(const String& iso) {
+  if (iso.length() < 10) return "sem-data";
+  return iso.substring(0, 10);
+}
+
+bool A7672Firebase::sendFix(const GnssFix& fix) {
+  if (!fix.valid) {
+    _lastError = "Sem fix valido";
+    return false;
+  }
+  if (!ensureAuth()) return false;
+
+  String utc = isoTimestamp(fix.utcDate, fix.utcTime);
+
+  String json = "{";
+  json += "\"lat\":"   + String(fix.lat, 6);
+  json += ",\"lon\":"  + String(fix.lon, 6);
+  if (utc.length()) json += ",\"utc\":\"" + utc + "\"";
+  json += ",\"alt\":"  + String(fix.altitude, 1);
+  json += ",\"kmh\":"  + String(fix.speedKmh, 1);
+  json += ",\"sats\":" + String(fix.svTotal);
+  json += ",\"hdop\":" + String(fix.hdop, 2);
+  json += "}";
+
+  String base = "/devices/" + _deviceId;
+
+  // A última posição sobrescreve (PUT); o histórico acumula (POST gera a chave)
+  // dentro do nó do dia, de modo que cada data vira um bloco separado.
+  bool okLast  = put(base + "/last.json", json, "PUT");
+  bool okTrack = put(base + "/track/" + dayKey(utc) + ".json", json, "POST");
+
+  return okLast && okTrack;
+}

@@ -29,6 +29,9 @@ HttpResponse A7672Http::request(int method, const String& url,
   if (url.startsWith("https://")) {
     _c.at("AT+CSSLCFG=\"sslversion\",0,4");
     _c.at("AT+CSSLCFG=\"authmode\",0,0");
+    // Sem SNI o handshake morre em ~0,3 s com '+HTTPACTION: <m>,715,0' em
+    // qualquer host atrás de CDN/vhost — ou seja, quase toda a internet.
+    _c.at("AT+CSSLCFG=\"enableSNI\",0,1");
     _c.at("AT+HTTPPARA=\"SSLCFG\",0");
   }
 

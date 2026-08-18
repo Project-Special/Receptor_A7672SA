@@ -7,6 +7,8 @@
 #include <voice.h>
 #include <gnss.h>
 #include <http.h>
+#include <tls.h>
+#include <firebase.h>
 
 // ── Pinos ────────────────────────────────────────────────────
 // UART2 do ESP32 ligada à UART principal do módulo (115200 8N1).
@@ -19,7 +21,21 @@ static const int PIN_STATUS = 5;    // -1 se o STATUS do módulo não estiver li
 // ALTO. Ligando direto no pino do módulo, troque para false (ativo em BAIXO).
 static const bool PWRKEY_ACTIVE_HIGH = true;
 
-static const char* APN = "claro.com.br";
+// O chip da bancada é um SIM IoT emnify (IMSI 724-51), que faz roaming nacional
+// na Claro mas usa APN próprio. Com um chip de operadora comum, troque para
+// "claro.com.br" / "zap.vivo.com.br" / "tim.br".
+static const char* APN = "em.mnc051.mcc724.gprs";
+
+// ── Firebase ─────────────────────────────────────────────────
+// A "Web API Key" fica em Configurações do projeto → Geral. O host do banco é
+// o que o console mostra em Realtime Database, sem o "https://" e sem a barra
+// final. Trocar por chave/host próprios antes de gravar.
+static const char* FB_API_KEY = "AIzaSyAZzlDyHvhqszlj8dq2Iy8VuT9uTS3sv9I";
+static const char* FB_DB_HOST = "rastreador-gps-c1dc7-default-rtdb.firebaseio.com";
+static const char* FB_DEVICE  = "rastreador01";
+
+// Intervalo entre envios. Cada envio são duas escritas (última + histórico).
+static const uint32_t FB_INTERVAL_MS = 30000;
 
 A7672Core  modem;
 A7672Net   net(modem);
@@ -27,6 +43,8 @@ A7672Sms   sms(modem);
 A7672Voice voice(modem);
 A7672Gnss  gnss(modem);
 A7672Http  http(modem, net);
+A7672Tls   tls(modem, net);
+A7672Firebase firebase(tls);
 
 static void printFix(const GnssFix& f) {
   if (!f.valid) { Serial.println(F("GNSS: sem fix ainda")); return; }
@@ -107,6 +125,11 @@ void setup() {
   HttpResponse r = http.get("https://httpbin.org/get");
   if (r.status == -1) Serial.println(F("HTTP: sem contexto PDP — confira o APN."));
   else Serial.printf("HTTP %d, %u bytes:\n%s\n", r.status, (unsigned)r.length, r.body.c_str());
+
+  // ── Firebase ───────────────────────────────────────────────
+  firebase.begin(FB_API_KEY, FB_DB_HOST, FB_DEVICE);
+  if (firebase.ensureAuth()) Serial.println(F("Firebase: autenticado (usuario anonimo)."));
+  else Serial.printf("Firebase: %s\n", firebase.lastError().c_str());
 }
 
 void loop() {
@@ -117,5 +140,19 @@ void loop() {
   if (millis() - last > 10000) {
     last = millis();
     printFix(gnss.fix());
+  }
+
+  // Envio periódico para o Firebase. Só sobe com fix válido: mandar 0,0 sujaria
+  // o histórico com pontos no golfo da Guiné.
+  static uint32_t lastSend = 0;
+  if (millis() - lastSend > FB_INTERVAL_MS) {
+    lastSend = millis();
+    const GnssFix& f = gnss.fix();
+    if (f.valid) {
+      if (firebase.sendFix(f))
+        Serial.printf("Firebase: %.6f, %.6f enviado\n", f.lat, f.lon);
+      else
+        Serial.printf("Firebase: falhou — %s\n", firebase.lastError().c_str());
+    }
   }
 }

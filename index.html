@@ -488,6 +488,9 @@
     .pill.on  { color: var(--green); border-color: #3fb95055; background: #16281a; }
     .pill.off { color: var(--text-dim); }
     .pill.err { color: var(--red); border-color: #f8514955; background: #2b1517; }
+    #fb-log .ok   { color: var(--green); }
+    #fb-log .err  { color: var(--red); }
+    #fb-log .warn { color: #d29922; }
 
     .hint { font-size: 11px; color: var(--text-dim); line-height: 1.6; }
     .hint code { font-family: var(--mono); color: var(--cyan); }
@@ -1002,6 +1005,9 @@
         <button class="cmd-btn" onclick="send('AT+CSSLCFG=&quot;authmode&quot;,0,0')">
           <span class="icon">🛡️</span><span class="label">Sem verificação de CA</span><span class="at-cmd">authmode 0</span>
         </button>
+        <button class="cmd-btn" onclick="send('AT+CSSLCFG=&quot;enableSNI&quot;,0,1')">
+          <span class="icon">🏷️</span><span class="label">SNI ligado (ctx 0)</span><span class="at-cmd">enableSNI 1</span>
+        </button>
       </div>
     </div>
 
@@ -1057,6 +1063,7 @@
       <div class="tab" onclick="showTab('gnss', this)">GNSS</div>
       <div class="tab" onclick="showTab('rede', this)">Rede</div>
       <div class="tab" onclick="showTab('map', this)">Mapa</div>
+      <div class="tab" onclick="showTab('firebase', this)">Firebase</div>
       <div class="tab" onclick="showTab('sms', this)">SMS</div>
       <div class="tab" onclick="showTab('voz', this)">Voz</div>
       <div class="tab" onclick="showTab('http', this)">HTTP</div>
@@ -1523,6 +1530,65 @@
         </div>
       </div>
 
+      <!-- ══════════ Firebase ══════════ -->
+      <div class="panel" id="panel-firebase">
+        <div class="pane">
+          <h3>Firebase — Realtime Database</h3>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Host do banco</label>
+              <input id="fbHost" type="text" value="rastreador-gps-c1dc7-default-rtdb.firebaseio.com"
+                     placeholder="projeto-default-rtdb.firebaseio.com" />
+            </div>
+            <div class="form-group" style="max-width:230px;">
+              <label>Web API Key</label>
+              <input id="fbKey" type="password" placeholder="AIza..." />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group" style="max-width:220px;">
+              <label>ID do dispositivo</label>
+              <input id="fbDevice" type="text" value="rastreador01" />
+            </div>
+            <div class="form-group" style="max-width:150px;">
+              <label>Intervalo (s)</label>
+              <input id="fbInterval" type="number" min="5" value="30" />
+            </div>
+            <div class="form-group" style="max-width:210px;">
+              <label>Histórico</label>
+              <select id="fbTrack">
+                <option value="1" selected>Última + histórico do dia</option>
+                <option value="0">Só a última posição</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="btn-row">
+            <button class="action-btn" id="fbToggleBtn" onclick="firebaseToggle()">▶️ Iniciar envio</button>
+            <button class="action-btn secondary" onclick="firebaseTestConnection()">🔍 Testar conexão</button>
+            <button class="action-btn secondary" onclick="firebaseSendNow()">📤 Enviar agora</button>
+            <button class="action-btn secondary" onclick="firebaseOpenConsole()">🌐 Abrir no console</button>
+            <button class="action-btn secondary" onclick="firebaseForget()">🗑️ Esquecer credenciais</button>
+          </div>
+
+          <div class="info-grid">
+            <div class="info-card"><div class="card-label">Estado</div><div class="card-value" id="fb-state" style="font-size:15px;">Parado</div></div>
+            <div class="info-card"><div class="card-label">Autenticação</div><div class="card-value" id="fb-auth" style="font-size:15px;">--</div></div>
+            <div class="info-card"><div class="card-label">Enviados</div><div class="card-value" id="fb-sent" style="font-size:15px;">0</div></div>
+            <div class="info-card"><div class="card-label">Falhas</div><div class="card-value" id="fb-fail" style="font-size:15px;">0</div></div>
+            <div class="info-card"><div class="card-label">Último envio</div><div class="card-value" id="fb-last" style="font-size:15px;">--</div></div>
+            <div class="info-card"><div class="card-label">Nó do dia</div><div class="card-value" id="fb-day" style="font-size:15px;">--</div></div>
+          </div>
+
+          <div class="form-group" style="flex:1;min-height:0;">
+            <label>Log do Firebase</label>
+            <div class="console-box" id="fb-log">Preencha host e API key, depois use "Testar conexão".</div>
+          </div>
+        </div>
+      </div>
+
       <!-- ══════════ MQTT ══════════ -->
       <div class="panel" id="panel-mqtt">
         <div class="pane">
@@ -1841,6 +1907,10 @@ let fixSearchStart = null;
 let lastFixTs = 0;
 let trackDistanceKm = 0;
 let nmeaStreaming = false;
+
+// Último fix em forma estruturada. Os cards da tela guardam texto já formatado;
+// para enviar ao Firebase é preciso o número cru.
+let lastFix = null;
 
 // HTTP
 let httpReadPending = false;
@@ -2257,7 +2327,7 @@ const AT_SUGGESTIONS = [
   'AT+NETOPEN','AT+NETCLOSE','AT+IPADDR','AT+CIPOPEN?','AT+CIPCLOSE=0','AT+CIPRXGET=1','AT+CDNSGIP="google.com"',
   'AT+HTTPINIT','AT+HTTPTERM','AT+HTTPACTION=0','AT+HTTPACTION=1','AT+HTTPHEAD','AT+HTTPREAD=0,1024',
   'AT+CMQTTSTART','AT+CMQTTSTOP','AT+CMQTTDISC=0,120','AT+CMQTTREL=0',
-  'AT+FSCD?','AT+FSLS','AT+FSMEM','AT+CCERTLIST','AT+CSSLCFG="sslversion",0,4',
+  'AT+FSCD?','AT+FSLS','AT+FSMEM','AT+CCERTLIST','AT+CSSLCFG="sslversion",0,4','AT+CSSLCFG="enableSNI",0,1',
   'AT+CBC','AT+CPMUTEMP','AT+CADC?','AT+CCLK?','AT+CTZU=1','AT+CSCLK=0','AT+CSCLK=1'
 ];
 
@@ -3219,6 +3289,16 @@ function parseCGNSSINFO(line) {
   setLocalTime(dateF, timeF);
 
   lastFixTs = Date.now();
+  lastFix = {
+    lat, lon,
+    alt:  isNaN(alt) ? null : alt,
+    kmh:  spdKmh,
+    sats: total,
+    hdop: parseFloat(hdop) || null,
+    utc:  gnssIso(dateF, timeF),
+    src:  'CGNSSINFO',
+  };
+  firebaseOnFix();
 
   const ml = document.getElementById('mapLink');
   ml.href = `https://www.google.com/maps?q=${lat},${lon}`;
@@ -3417,6 +3497,16 @@ function renderNmeaFix() {
   }
 
   lastFixTs = Date.now();
+  lastFix = {
+    lat: s.lat, lon: s.lon,
+    alt: alt,
+    kmh: spdKmh,
+    sats: total,
+    hdop: parseFloat(s.hdop) || null,
+    utc: gnssIso(s.date, s.time),
+    src: 'NMEA',
+  };
+  firebaseOnFix();
 
   const ml = document.getElementById('mapLink');
   if (ml) { ml.href = `https://www.google.com/maps?q=${s.lat},${s.lon}`; ml.style.display = 'inline-flex'; }
@@ -4139,6 +4229,9 @@ async function httpRequest() {
   if (ssl) {
     await sendWait('AT+CSSLCFG="sslversion",0,4');
     await sendWait('AT+CSSLCFG="authmode",0,0');
+    // Sem SNI o handshake morre em ~0,3 s com '+HTTPACTION: <m>,715,0' em
+    // qualquer host atrás de CDN/vhost — ou seja, quase toda a internet.
+    await sendWait('AT+CSSLCFG="enableSNI",0,1');
     await sendWait('AT+HTTPPARA="SSLCFG",0');
   }
   if (method === 1) {
@@ -4157,6 +4250,273 @@ async function httpRequest() {
   if (!res) { log('sys', 'Timeout aguardando +HTTPACTION.', 'err'); setText('http-state', 'Timeout'); return; }
   await delay(200);
   await httpReadAll();
+}
+
+// ── Firebase ──────────────────────────────────────────────────
+// O envio sai do NAVEGADOR, não do módulo. É a diferença que torna isto
+// simples: o idToken do Firebase tem ~860 caracteres e não caberia no
+// AT+HTTPPARA (máx. 600 na URL, 287 no header). No fetch() não há esse teto.
+const FB_STORE = 'a7672.firebase';
+
+let fbTimer = null;
+let fbAuth = { idToken: '', refreshToken: '', expiresAt: 0, uid: '' };
+let fbStats = { sent: 0, fail: 0, lastSentAt: 0 };
+let fbBusy = false;
+
+// ddmmyy + hhmmss do NMEA -> "2026-08-18T13:45:02Z".
+function gnssIso(date, time) {
+  if (!date || !time || date.length < 6 || time.length < 6) return '';
+  return `20${date.slice(4,6)}-${date.slice(2,4)}-${date.slice(0,2)}`
+       + `T${time.slice(0,2)}:${time.slice(2,4)}:${time.slice(4,6)}Z`;
+}
+
+function fbLog(msg, cls = '') {
+  const box = document.getElementById('fb-log');
+  if (!box) return;
+  const t = new Date().toLocaleTimeString('pt-BR');
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = `[${t}] ${msg}`;
+  if (box.children.length === 0) box.textContent = '';
+  box.appendChild(line);
+  while (box.children.length > 200) box.removeChild(box.firstChild);
+  box.scrollTop = box.scrollHeight;
+}
+
+function firebaseCfg() {
+  const host = (document.getElementById('fbHost').value || '')
+    .trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+  return {
+    host,
+    key:      (document.getElementById('fbKey').value || '').trim(),
+    device:   (document.getElementById('fbDevice').value || 'rastreador01').trim(),
+    interval: Math.max(5, parseInt(document.getElementById('fbInterval').value, 10) || 30),
+    track:    document.getElementById('fbTrack').value === '1',
+  };
+}
+
+function firebaseSaveCfg() {
+  const c = firebaseCfg();
+  try {
+    localStorage.setItem(FB_STORE, JSON.stringify({
+      ...c, refreshToken: fbAuth.refreshToken,
+    }));
+  } catch (e) { /* modo privado bloqueia o storage; não é motivo para parar */ }
+}
+
+function firebaseLoadCfg() {
+  let s;
+  try { s = JSON.parse(localStorage.getItem(FB_STORE) || '{}'); } catch (e) { return; }
+  if (s.host)     document.getElementById('fbHost').value = s.host;
+  if (s.key)      document.getElementById('fbKey').value = s.key;
+  if (s.device)   document.getElementById('fbDevice').value = s.device;
+  if (s.interval) document.getElementById('fbInterval').value = s.interval;
+  if (s.track !== undefined) document.getElementById('fbTrack').value = s.track ? '1' : '0';
+  if (s.refreshToken) {
+    fbAuth.refreshToken = s.refreshToken;
+    setText('fb-auth', 'Token salvo');
+  }
+}
+
+function firebaseForget() {
+  if (!confirm('Apagar host, API key e o token salvo deste navegador?')) return;
+  firebaseStop();
+  fbAuth = { idToken: '', refreshToken: '', expiresAt: 0, uid: '' };
+  try { localStorage.removeItem(FB_STORE); } catch (e) {}
+  document.getElementById('fbKey').value = '';
+  setText('fb-auth', '--');
+  fbLog('Credenciais apagadas deste navegador.', 'warn');
+}
+
+function firebaseOpenConsole() {
+  const { host } = firebaseCfg();
+  const project = host.replace(/-default-rtdb\..*$/, '').replace(/\..*$/, '');
+  if (!project) { alert('Preencha o host do banco primeiro.'); return; }
+  window.open(`https://console.firebase.google.com/project/${project}/database`, '_blank', 'noopener');
+}
+
+// Reaproveita o refreshToken quando há um: assim o UID anônimo continua o mesmo
+// entre recargas da página, em vez de criar um usuário novo a cada hora.
+async function firebaseEnsureAuth() {
+  const { key } = firebaseCfg();
+  if (!key) throw new Error('Web API Key não preenchida');
+
+  if (fbAuth.idToken && Date.now() < fbAuth.expiresAt - 5 * 60 * 1000) return fbAuth.idToken;
+
+  if (fbAuth.refreshToken) {
+    const r = await fetch(`https://securetoken.googleapis.com/v1/token?key=${key}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(fbAuth.refreshToken)}`,
+    });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.id_token) {
+      fbAuth.idToken = j.id_token;
+      fbAuth.refreshToken = j.refresh_token || fbAuth.refreshToken;
+      fbAuth.expiresAt = Date.now() + (parseInt(j.expires_in, 10) || 3600) * 1000;
+      fbAuth.uid = j.user_id || fbAuth.uid;
+      setText('fb-auth', `UID ${fbAuth.uid.slice(0, 8)}… (renovado)`);
+      firebaseSaveCfg();
+      return fbAuth.idToken;
+    }
+    fbLog('Refresh recusado; criando novo usuário anônimo.', 'warn');
+    fbAuth.refreshToken = '';
+  }
+
+  const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${key}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ returnSecureToken: true }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const msg = j?.error?.message || `HTTP ${r.status}`;
+    if (msg === 'OPERATION_NOT_ALLOWED')
+      throw new Error('Login anônimo desabilitado — Console → Authentication → Sign-in method');
+    if (/API key not valid/i.test(msg))
+      throw new Error('Web API Key inválida');
+    throw new Error(msg);
+  }
+  fbAuth.idToken = j.idToken;
+  fbAuth.refreshToken = j.refreshToken || '';
+  fbAuth.expiresAt = Date.now() + (parseInt(j.expiresIn, 10) || 3600) * 1000;
+  fbAuth.uid = j.localId || '';
+  setText('fb-auth', `UID ${fbAuth.uid.slice(0, 8)}…`);
+  firebaseSaveCfg();
+  return fbAuth.idToken;
+}
+
+async function fbWrite(path, payload, method) {
+  const { host } = firebaseCfg();
+  const token = await firebaseEnsureAuth();
+  const r = await fetch(`https://${host}${path}?auth=${token}`, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '');
+    if (r.status === 401) {
+      fbAuth.idToken = '';           // força renovar no próximo ciclo
+      throw new Error('401 — regras bloqueadas ou token vencido');
+    }
+    if (r.status === 404) throw new Error('404 — host do banco errado');
+    throw new Error(`HTTP ${r.status} ${txt.slice(0, 120)}`);
+  }
+  return r.json().catch(() => null);
+}
+
+function fbPayload(fix) {
+  const p = { lat: +fix.lat.toFixed(6), lon: +fix.lon.toFixed(6) };
+  if (fix.utc) p.utc = fix.utc;
+  if (fix.alt !== null && fix.alt !== undefined) p.alt = +fix.alt.toFixed(1);
+  if (fix.kmh !== undefined) p.kmh = +fix.kmh.toFixed(1);
+  if (fix.sats) p.sats = fix.sats;
+  if (fix.hdop) p.hdop = +fix.hdop.toFixed(2);
+  return p;
+}
+
+// A chave do dia sai da data do satélite; sem ela, um nó à parte evita
+// contaminar um dia real com pontos de data desconhecida.
+function fbDayKey(iso) {
+  return (iso && iso.length >= 10) ? iso.slice(0, 10) : 'sem-data';
+}
+
+async function firebaseSendNow() {
+  const c = firebaseCfg();
+  if (!c.host || !c.key) { alert('Preencha o host do banco e a Web API Key.'); return; }
+  if (!lastFix) { fbLog('Sem fix válido — nada enviado.', 'warn'); return; }
+  if (fbBusy) return;
+
+  fbBusy = true;
+  const fix = lastFix;
+  const payload = fbPayload(fix);
+  const day = fbDayKey(fix.utc);
+  const base = `/devices/${encodeURIComponent(c.device)}`;
+
+  try {
+    await fbWrite(`${base}/last.json`, payload, 'PUT');
+    if (c.track) await fbWrite(`${base}/track/${day}.json`, payload, 'POST');
+
+    fbStats.sent++;
+    fbStats.lastSentAt = Date.now();
+    setText('fb-sent', fbStats.sent);
+    setText('fb-last', new Date().toLocaleTimeString('pt-BR'));
+    setText('fb-day', c.track ? day : '(desligado)');
+    fbLog(`Enviado: ${payload.lat}, ${payload.lon}${payload.utc ? ' @ ' + payload.utc : ''}`, 'ok');
+  } catch (e) {
+    fbStats.fail++;
+    setText('fb-fail', fbStats.fail);
+    setText('fb-state', 'Erro');
+    fbLog(`Falha: ${e.message}`, 'err');
+  } finally {
+    fbBusy = false;
+  }
+}
+
+// Chamado a cada fix novo. Com o envio automático ligado, respeita o intervalo
+// configurado em vez de mandar a cada quadro do GNSS.
+function firebaseOnFix() {
+  if (!fbTimer || fbBusy) return;
+  const c = firebaseCfg();
+  if (Date.now() - fbStats.lastSentAt < c.interval * 1000) return;
+  firebaseSendNow();
+}
+
+async function firebaseTestConnection() {
+  const c = firebaseCfg();
+  if (!c.host || !c.key) { alert('Preencha o host do banco e a Web API Key.'); return; }
+  firebaseSaveCfg();
+  setText('fb-state', 'Testando');
+  fbLog('Testando autenticação e escrita...');
+
+  try {
+    await firebaseEnsureAuth();
+    fbLog(`Auth ok — UID ${fbAuth.uid}, idToken com ${fbAuth.idToken.length} chars`, 'ok');
+
+    const probe = { lat: 0, lon: 0, utc: new Date().toISOString().replace(/\.\d+Z$/, 'Z') };
+    await fbWrite(`/devices/${encodeURIComponent(c.device)}/_teste.json`, probe, 'PUT');
+    fbLog('Escrita ok.', 'ok');
+
+    await fetch(`https://${c.host}/devices/${encodeURIComponent(c.device)}/_teste.json?auth=${fbAuth.idToken}`,
+                { method: 'DELETE' });
+    fbLog('Tudo pronto — pode iniciar o envio.', 'ok');
+    setText('fb-state', 'Pronto');
+  } catch (e) {
+    setText('fb-state', 'Erro');
+    fbLog(`Falha: ${e.message}`, 'err');
+  }
+}
+
+function firebaseStart() {
+  const c = firebaseCfg();
+  if (!c.host || !c.key) { alert('Preencha o host do banco e a Web API Key.'); return; }
+  firebaseSaveCfg();
+
+  // Um timer próprio cobre o caso de o GNSS parar de emitir: sem ele o envio
+  // dependeria só da chegada de fixes novos e morreria em silêncio.
+  fbTimer = setInterval(() => {
+    if (lastFix) firebaseSendNow();
+  }, c.interval * 1000);
+
+  setText('fb-state', 'Enviando');
+  document.getElementById('fbToggleBtn').textContent = '⏹️ Parar envio';
+  fbLog(`Envio automático a cada ${c.interval}s para /devices/${c.device}.`, 'ok');
+  if (lastFix) firebaseSendNow();
+  else fbLog('Aguardando o primeiro fix do GNSS...', 'warn');
+}
+
+function firebaseStop() {
+  if (fbTimer) clearInterval(fbTimer);
+  fbTimer = null;
+  setText('fb-state', 'Parado');
+  const b = document.getElementById('fbToggleBtn');
+  if (b) b.textContent = '▶️ Iniciar envio';
+}
+
+function firebaseToggle() {
+  if (fbTimer) { firebaseStop(); fbLog('Envio automático parado.', 'warn'); }
+  else firebaseStart();
 }
 
 // ── MQTT ──────────────────────────────────────────────────────
@@ -4185,6 +4545,7 @@ async function mqttFullConnect() {
   if (ssl) {
     await sendWait('AT+CSSLCFG="sslversion",0,4');
     await sendWait('AT+CSSLCFG="authmode",0,0');
+    await sendWait('AT+CSSLCFG="enableSNI",0,1');
     await sendWait('AT+CMQTTSSLCFG=0,0');
   }
   const conn = waitFor(l => l.startsWith('+CMQTTCONNECT:'), 30000);
@@ -4317,7 +4678,8 @@ async function sslApply() {
   const ctx = document.getElementById('sslCtx').value;
   await sendWait(`AT+CSSLCFG="sslversion",${ctx},${document.getElementById('sslVer').value}`);
   await sendWait(`AT+CSSLCFG="authmode",${ctx},${document.getElementById('sslAuth').value}`);
-  log('sys', `Contexto SSL ${ctx} configurado.`, 'ok');
+  await sendWait(`AT+CSSLCFG="enableSNI",${ctx},1`);
+  log('sys', `Contexto SSL ${ctx} configurado (SNI ligado).`, 'ok');
 }
 
 function sslBindCa() {
@@ -4655,6 +5017,8 @@ window.addEventListener('load', () => {
   document.querySelectorAll('.cmd-btn').forEach(btn => {
     btn.addEventListener('click', () => { if (window.innerWidth <= 768) closeSidebar(); });
   });
+
+  firebaseLoadCfg();
 
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' })

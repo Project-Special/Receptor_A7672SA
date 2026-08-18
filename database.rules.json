@@ -1,0 +1,30 @@
+{
+  "rules": {
+    "devices": {
+      "$device": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+
+        "last": {
+          ".validate": "newData.hasChildren(['lat','lon'])",
+          "lat": { ".validate": "newData.isNumber() && newData.val() >= -90  && newData.val() <= 90" },
+          "lon": { ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180" },
+          "utc": { ".validate": "newData.isString()" },
+          "$outro": { ".validate": "newData.isNumber() || newData.isString()" }
+        },
+
+        "track": {
+          "$day": {
+            "$entry": {
+              ".validate": "newData.hasChildren(['lat','lon'])",
+              "lat": { ".validate": "newData.isNumber() && newData.val() >= -90  && newData.val() <= 90" },
+              "lon": { ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180" },
+              "utc": { ".validate": "newData.isString()" },
+              "$outro": { ".validate": "newData.isNumber() || newData.isString()" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
