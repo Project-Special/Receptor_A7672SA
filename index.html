@@ -218,6 +218,11 @@
     #map-wrapper { position: absolute; inset: 0; overflow: hidden; }
     #leaflet-map { width: 100%; height: 100%; background: #0a0e14; }
 
+    /* No desktop o agrupador não deve existir para o layout: os filhos seguem
+       posicionados sobre o mapa, exatamente como antes. */
+    #map-overlays { display: contents; }
+    #mapMenuBtn, #map-menu-backdrop { display: none; }
+
     /* TERMINAL */
     .terminal-wrap {
       flex: 1;
@@ -639,22 +644,64 @@
          estreitos ao lado de campos de largura total. */
       .form-row .form-group { max-width: none !important; }
 
-      /* Centralizado com nowrap, a barra do mapa era cortada dos dois lados.
-         Compactada, cabe em uma linha em vez de três sobre o mapa. */
-      #map-infobar { left: 8px; right: 8px; top: 8px !important; transform: none;
-                     white-space: normal; flex-wrap: wrap; justify-content: center;
-                     gap: 10px !important; padding: 4px 10px !important; font-size: 11px !important; }
-      /* HDOP já aparece no painel GNSS; fora daqui a barra cabe em uma linha. */
-      #map-hdop { display: none; }
+      /* ── Mapa no celular ─────────────────────────────────────
+         Antes, três camadas (coordenadas, fonte dos dados e cinco botões)
+         ficavam empilhadas SOBRE o mapa e comiam quase metade da altura
+         útil. Agora nada fica sobreposto: tudo vai para uma gaveta que só
+         aparece ao tocar no ☰. */
+      #map-wrapper { min-height: 50vh; }
 
-      /* Cinco botões com rótulo ocupavam 3 linhas EM CIMA do mapa. Só os
-         ícones, numa única linha rente à borda, tapam ~44px em vez de 112. */
-      #map-controls { gap: 6px; padding: 0 !important; flex-wrap: nowrap !important;
-                      bottom: 10px !important; left: 8px !important; right: 8px !important; }
-      #map-controls .action-btn { flex: 1 1 0; min-width: 0; min-height: 44px;
-                                  padding: 10px 0; font-size: 17px; text-align: center; }
-      #map-controls .mi { margin-right: 0; }
-      #map-controls .ml { display: none; }
+      #map-overlays {
+        display: none;
+        position: absolute; top: 0; right: 0; bottom: 0;
+        width: min(88%, 330px);
+        z-index: 1300;
+        background: rgba(13,17,23,0.97);
+        border-left: 1px solid var(--border);
+        box-shadow: -6px 0 24px rgba(0,0,0,0.6);
+        padding: 56px 12px 12px;
+        overflow-y: auto;
+        flex-direction: column; gap: 10px;
+      }
+      body.mapmenu-open #map-overlays { display: flex; }
+
+      /* Os três blocos foram desenhados para flutuar sobre o mapa; dentro da
+         gaveta precisam voltar a ser elementos de fluxo normal. */
+      #map-overlays > * {
+        position: static !important;
+        transform: none !important;
+        top: auto !important; right: auto !important;
+        bottom: auto !important; left: auto !important;
+        width: 100%;
+        pointer-events: auto !important;
+      }
+      #map-infobar { flex-wrap: wrap; justify-content: flex-start;
+                     gap: 10px !important; padding: 8px 10px !important;
+                     font-size: 12px !important; white-space: normal; }
+      #map-source-bar { flex-direction: column; align-items: stretch !important; }
+      #map-source-bar select { width: 100%; min-height: 40px; }
+      #mapFbControls { flex-direction: column; align-items: stretch !important; width: 100%; }
+
+      /* Na gaveta há largura para o rótulo: só o ícone obrigava a decorar o
+         que cada botão fazia. */
+      #map-controls { flex-direction: column; gap: 8px; flex-wrap: nowrap !important; }
+      #map-controls .action-btn { width: 100%; min-height: 44px; font-size: 14px;
+                                  display: flex; align-items: center; justify-content: center; gap: 8px; }
+      #map-controls .ml { display: inline; }
+
+      #mapMenuBtn {
+        display: flex; align-items: center; justify-content: center;
+        position: absolute; top: 8px; right: 8px; z-index: 1400;
+        width: 44px; height: 44px; font-size: 20px;
+        background: rgba(22,27,34,0.94); color: var(--text);
+        border: 1px solid var(--border); border-radius: 10px;
+        backdrop-filter: blur(4px); cursor: pointer;
+      }
+      body.mapmenu-open #mapMenuBtn { background: var(--accent); color: #fff; }
+
+      #map-menu-backdrop { position: absolute; inset: 0; z-index: 1200;
+                           background: rgba(0,0,0,0.35); }
+      body.mapmenu-open #map-menu-backdrop { display: block; }
     }
 
     @media (max-width: 380px) {
@@ -1363,6 +1410,15 @@
       <!-- ══════════ MAPA ══════════ -->
       <div class="panel" id="panel-map">
         <div id="map-wrapper">
+          <!-- Botão e fundo do menu: só existem no celular (CSS). No desktop
+               os overlays continuam soltos sobre o mapa. -->
+          <button id="mapMenuBtn" onclick="toggleMapMenu()" aria-label="Controles do mapa"
+                  aria-expanded="false" title="Controles do mapa">☰</button>
+          <div id="map-menu-backdrop" onclick="closeMapMenu()"></div>
+
+          <!-- display:contents no desktop, gaveta no celular: assim os três
+               blocos abaixo mantêm o posicionamento original na tela grande. -->
+          <div id="map-overlays">
           <div id="map-infobar" style="
             position:absolute;top:10px;left:50%;transform:translateX(-50%);
             z-index:1000;background:rgba(22,27,34,0.92);border:1px solid var(--border);
@@ -1412,6 +1468,7 @@
             <button class="action-btn secondary" onclick="mapClearTrack()" aria-label="Limpar rastro"><span class="mi">🗑️</span><span class="ml">Limpar rastro</span></button>
             <button class="action-btn secondary" onclick="mapFitTrack()" aria-label="Enquadrar todo o rastro"><span class="mi">🔲</span><span class="ml">Ver tudo</span></button>
             <button class="action-btn secondary" onclick="exportGpx()" aria-label="Exportar GPX"><span class="mi">⬇</span><span class="ml">GPX</span></button>
+          </div>
           </div>
 
           <div id="leaflet-map"></div>
@@ -4949,6 +5006,17 @@ function setMapFollow(on, porArraste) {
 
 function mapFollowToggle() { setMapFollow(!mapFollow); }
 
+// ── Gaveta de controles do mapa (celular) ─────────────────────
+function toggleMapMenu() {
+  const aberto = document.body.classList.toggle('mapmenu-open');
+  document.getElementById('mapMenuBtn')?.setAttribute('aria-expanded', aberto ? 'true' : 'false');
+}
+
+function closeMapMenu() {
+  document.body.classList.remove('mapmenu-open');
+  document.getElementById('mapMenuBtn')?.setAttribute('aria-expanded', 'false');
+}
+
 // ── Mapa: fonte dos pontos (ao vivo x Firebase) ───────────────
 // O histórico entra em camadas próprias. Reaproveitar mapTrack faria o rastro
 // ao vivo e o dia carregado se sobrescreverem — e o primeiro fix novo apagaria
@@ -5133,9 +5201,14 @@ function showTab(name, el) {
   else document.querySelector(`.tab[onclick*="'${name}'"]`)?.classList.add('active');
 
   if (name === 'map') {
+    // No celular a barra de conexão sozinha comia ~200px — mais do que o mapa
+    // inteiro tinha sobrando. Quem chegou ao mapa já conectou.
+    autoHideConnBar(true);
     if (!mapObj) initMap(); else resizeMap();
     requestAnimationFrame(() => requestAnimationFrame(resizeMap));
     setTimeout(resizeMap, 130);
+  } else {
+    closeMapMenu();
   }
 }
 
@@ -5207,6 +5280,16 @@ window.addEventListener('load', () => {
   });
 
   firebaseLoadCfg();
+
+  // Agir e a gaveta continuar aberta tapando o resultado seria o pior dos
+  // dois mundos: o toque some com ela, menos o seletor de dia, que costuma
+  // ser usado várias vezes seguidas.
+  document.querySelectorAll('#map-controls .action-btn').forEach(b => {
+    b.addEventListener('click', () => closeMapMenu());
+  });
+  document.getElementById('mapFbDay')?.addEventListener('change', () => {
+    if (window.innerWidth <= 768) closeMapMenu();
+  });
 
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' })
