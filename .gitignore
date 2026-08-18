@@ -4,3 +4,9 @@ Thumbs.db
 *.log
 .pio/
 __pycache__/
+
+# Credenciais soltas: a Web API key do Firebase não é secreta, mas um arquivo
+# de chaves no repositório vira o lugar errado na primeira vez que alguém
+# guardar ali um segredo de verdade.
+api_key.txt
+*.secret
