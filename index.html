@@ -513,6 +513,22 @@
     .esp-hint  { font-weight: 400; font-size: 11px; color: var(--text-dim); }
     .esp-nota  { font-size: 11px; color: var(--text-dim); margin-top: 8px; line-height: 1.5; }
 
+    /* Rótulos de tamanhos diferentes desalinhavam os campos: "DISTÂNCIA
+       MÍNIMA (M)" quebra em duas linhas e empurrava só aquele input para
+       baixo. Reservar a altura de duas linhas e ancorar o texto embaixo
+       alinha todos, inclusive quando outro rótulo quebrar numa tela menor. */
+    #panel-esp32 .form-row .form-group label {
+      min-height: 2.6em;
+      display: flex;
+      align-items: flex-end;
+      line-height: 1.25;
+    }
+    #panel-esp32 .form-row { align-items: flex-end; flex-wrap: wrap; }
+    @media (max-width: 768px) {
+      /* Empilhado, cada rótulo fica junto do seu campo e a reserva sobra. */
+      #panel-esp32 .form-row .form-group label { min-height: 0; }
+    }
+
     /* Lista da varredura de redes. Uma linha por rede, com marcador de
        seleção à esquerda: em cartões lado a lado não ficava claro que dava
        para clicar, nem qual estava escolhida. */
@@ -1767,12 +1783,12 @@
                 <label>ID do device</label>
                 <input id="fbRemoteDevice" type="text" value="esp32-01" onchange="fbRemoteLoadConfig()" />
               </div>
-              <div class="form-group" style="max-width:150px;">
+              <div class="form-group" style="max-width:145px;">
                 <label>Publicar a cada (s)</label>
                 <input id="fbRemoteInterval" type="number" min="5" max="3600" value="30" />
               </div>
-              <div class="form-group" style="max-width:160px;">
-                <label>Distância mínima (m)</label>
+              <div class="form-group" style="max-width:150px;">
+                <label>Dist. mínima (m)</label>
                 <input id="fbRemoteMinDist" type="number" min="0" max="10000" value="0"
                        title="0 envia todo ciclo. Parado, o GPS oscila 7 a 17 m e cada oscilação vira um ponto novo; 15 a 25 m corta isso." />
               </div>
