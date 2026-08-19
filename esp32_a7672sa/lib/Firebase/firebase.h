@@ -85,8 +85,19 @@ public:
   const String& lastError() const { return _lastError; }
 
   // ddmmyy + hhmmss do NMEA -> "2026-08-18T13:45:02Z". Vazio se a data
-  // ainda não veio do satélite.
+  // ainda não veio do satélite. Sempre UTC: é o que o "Z" promete, e o
+  // timestamp gravado não deve depender de onde o aparelho está.
   static String isoTimestamp(const String& utcDate, const String& utcTime);
+
+  // Mesmo instante deslocado pelo fuso, em "AAAA-MM-DDTHH:MM:SS" (sem "Z",
+  // porque não é mais UTC). Usado para a hora do display e para a chave do dia
+  // do histórico — sem isso a virada acontecia à meia-noite de Londres, e um
+  // ponto das 22h daqui já entrava no nó do dia seguinte.
+  static String localTimestamp(const String& utcDate, const String& utcTime, int tzMin);
+
+  // Fuso em minutos (-180 = Brasília). Vem do /config.
+  void setTzMinutes(int m) { _tzMin = m; }
+  int  tzMinutes() const   { return _tzMin; }
 
   // Nó do dia dentro do histórico: "2026-08-18", ou "sem-data" enquanto o
   // receptor ainda não entregou a data.
@@ -114,6 +125,7 @@ private:
   uint32_t _remoteInterval = 0;
   uint32_t _statusEvery = 0;
   float _minDist = 0;             // metros; 0 = envia todo ciclo
+  int _tzMin = -180;              // Brasília por padrão
   double _lastLat = 0, _lastLon = 0;
   bool _temUltimo = false;
 };

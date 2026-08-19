@@ -197,6 +197,37 @@ static void comandoWifi(const String& cmd) {
   wifiReconectar = true;
 }
 
+// Varredura de redes, disparada pelo app. Assíncrona de propósito: o
+// scanNetworks() bloqueante segura o loop por 2 a 4 s, que foi exatamente o
+// que congelava o display na versão anterior do @WIFI.
+static void comandoScan() {
+  int estado = WiFi.scanComplete();
+  if (estado == WIFI_SCAN_RUNNING) { Serial.println("@SCAN:JA_RODANDO"); return; }
+
+  WiFi.mode(WIFI_STA);          // sem STA ligado o scan volta vazio
+  WiFi.scanDelete();
+  WiFi.scanNetworks(true, true);   // async, incluindo redes ocultas
+  Serial.println("@SCAN:INICIO");
+  logf("Wi-Fi: varrendo redes...");
+}
+
+// Publica o resultado quando ele fica pronto. Chamado pelo wifiPump().
+static void scanPump() {
+  int n = WiFi.scanComplete();
+  if (n < 0) return;               // ainda rodando, ou nada pedido
+
+  for (int i = 0; i < n; i++) {
+    String ssid = WiFi.SSID(i);
+    ssid.replace("\\", "\\\\");
+    ssid.replace("\"", "\\\"");
+    Serial.println("@SCAN:NET {\"ssid\":\"" + ssid + "\",\"rssi\":" + String(WiFi.RSSI(i))
+                   + ",\"aberta\":" + (WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "true" : "false") + "}");
+  }
+  Serial.println("@SCAN:FIM " + String(n));
+  logf("Wi-Fi: %d rede(s) encontrada(s).", n);
+  WiFi.scanDelete();
+}
+
 static void pumpUsb() {
   while (Serial.available()) {
     char c = (char)Serial.read();
@@ -210,6 +241,7 @@ static void pumpUsb() {
       if (cmd == "@NORMAL")      { entrarPonte(false); continue; }
       if (cmd == "@PING")        { Serial.println(ponteAtiva ? "@BRIDGE:ON" : "@BRIDGE:OFF"); continue; }
       if (cmd.startsWith("@WIFI")) { comandoWifi(cmd); continue; }
+      if (cmd == "@SCAN")          { comandoScan();    continue; }
       if (ponteAtiva && cmd.length()) modem.write(cmd + "\r\n");
       continue;
     }
@@ -258,6 +290,8 @@ static void conectarWifi() {
 static void wifiPump() {
   static wl_status_t anterior = WL_IDLE_STATUS;
   static uint32_t desde = 0;
+
+  scanPump();
 
   if (wifiReconectar) {
     wifiReconectar = false;
@@ -451,7 +485,7 @@ void setup() {
   logf("Ponte: mande '@BRIDGE' por esta serial para falar AT com o modulo "
        "atraves do ESP32, e '@NORMAL' para devolver o controle ao firmware.");
   logf("Wi-Fi: '@WIFI?' mostra a rede, '@WIFI {\"ssid\":\"..\",\"pass\":\"..\"}' troca, "
-       "'@WIFI!' apaga. A senha nunca passa pelo Firebase.");
+       "'@WIFI!' apaga, '@SCAN' lista as redes. A senha nunca passa pelo Firebase.");
 }
 
 void loop() {
@@ -558,7 +592,9 @@ void loop() {
     e.fix = f.valid; e.mode = f.mode;
     e.lat = f.lat; e.lon = f.lon; e.alt = f.altitude;
     e.kmh = f.speedKmh; e.hdop = f.hdop; e.sats = f.svTotal;
-    e.utc = A7672Firebase::isoTimestamp(f.utcDate, f.utcTime);
+    // Hora local na tela: quem olha o aparelho quer saber que horas são aqui,
+    // não em Greenwich. O que sobe para o banco continua em UTC.
+    e.utc = A7672Firebase::localTimestamp(f.utcDate, f.utcTime, firebase.tzMinutes());
     e.operadora = netCache.operatorName; e.tech = netCache.tech;
     e.dbm = netCache.dbm; e.online = netCache.ip.length() > 0;
     e.envioAtivo = firebase.enabled();

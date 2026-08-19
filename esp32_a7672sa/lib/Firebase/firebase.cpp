@@ -35,6 +35,41 @@ String A7672Firebase::isoTimestamp(const String& utcDate, const String& utcTime)
   return "20" + yy + "-" + mm + "-" + dd + "T" + hh + ":" + mi + ":" + ss + "Z";
 }
 
+// Aritmética de calendário na mão: o relógio do ESP32 não é confiável aqui
+// (zera a cada reset) e time.h com timezone puxaria a stack de tz do sistema
+// sem ganho — o deslocamento é um número fixo vindo do /config.
+String A7672Firebase::localTimestamp(const String& utcDate, const String& utcTime, int tzMin) {
+  if (utcDate.length() < 6 || utcTime.length() < 6) return "";
+
+  int dd = utcDate.substring(0, 2).toInt();
+  int mm = utcDate.substring(2, 4).toInt();
+  int yy = utcDate.substring(4, 6).toInt() + 2000;
+  int hh = utcTime.substring(0, 2).toInt();
+  int mi = utcTime.substring(2, 4).toInt();
+  int ss = utcTime.substring(4, 6).toInt();
+
+  long minutos = hh * 60L + mi + tzMin;
+  int diasExtra = 0;
+  while (minutos < 0)     { minutos += 1440; diasExtra--; }
+  while (minutos >= 1440) { minutos -= 1440; diasExtra++; }
+  hh = minutos / 60; mi = minutos % 60;
+
+  static const int diasNoMes[] = { 31,28,31,30,31,30,31,31,30,31,30,31 };
+  auto ultimoDia = [&](int m, int a) {
+    if (m != 2) return diasNoMes[m - 1];
+    bool bissexto = (a % 4 == 0 && a % 100 != 0) || (a % 400 == 0);
+    return bissexto ? 29 : 28;
+  };
+
+  dd += diasExtra;
+  while (dd < 1)  { mm--; if (mm < 1)  { mm = 12; yy--; } dd += ultimoDia(mm, yy); }
+  while (dd > ultimoDia(mm, yy)) { dd -= ultimoDia(mm, yy); mm++; if (mm > 12) { mm = 1; yy++; } }
+
+  char buf[24];
+  snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d", yy, mm, dd, hh, mi, ss);
+  return String(buf);
+}
+
 void A7672Firebase::begin(const String& apiKey, const String& dbHost, const String& deviceId) {
   _apiKey = apiKey;
   _dbHost = dbHost;
@@ -213,6 +248,9 @@ bool A7672Firebase::fetchConfig() {
   String se = jsonRaw(body, "statusEvery");
   if (se.length()) _statusEvery = (uint32_t)se.toInt();
 
+  String tz = jsonRaw(body, "tz");
+  if (tz.length()) _tzMin = tz.toInt();
+
   return true;
 }
 
@@ -346,6 +384,10 @@ bool A7672Firebase::sendFix(const GnssFix& fix) {
 
   if (!_track) return okLast;
 
-  bool okTrack = put(base + "/track/" + dayKey(utc) + ".json", json, "POST");
+  // O nó do dia segue o fuso local: com a chave em UTC, a virada caía às 21h
+  // daqui e a "trilha de hoje" começava na noite anterior. O campo utc dentro
+  // do ponto continua em UTC — quem lê o dado precisa de um instante absoluto.
+  String local = localTimestamp(fix.utcDate, fix.utcTime, _tzMin);
+  bool okTrack = put(base + "/track/" + dayKey(local) + ".json", json, "POST");
   return okLast && okTrack;
 }

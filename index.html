@@ -512,6 +512,17 @@
                  gap: 10px; flex-wrap: wrap; }
     .esp-hint  { font-weight: 400; font-size: 11px; color: var(--text-dim); }
     .esp-nota  { font-size: 11px; color: var(--text-dim); margin-top: 8px; line-height: 1.5; }
+
+    /* Lista da varredura de redes */
+    .esp-redes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .esp-rede  { display: flex; align-items: center; gap: 8px; cursor: pointer;
+                 border: 1px solid var(--border); border-radius: 8px;
+                 padding: 7px 11px; font-size: 12px; color: var(--text);
+                 background: rgba(255,255,255,0.02); min-height: 38px; }
+    .esp-rede:hover      { border-color: var(--accent); background: rgba(88,166,255,0.08); }
+    .esp-rede.atual      { border-color: #2f6c55; background: #10251c; }
+    .esp-rede .rssi      { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+    .esp-rede .cadeado   { opacity: 0.75; }
     @media (max-width: 768px) {
       .esp-sec { padding: 10px; }
       .esp-head { flex-direction: column; align-items: flex-start; gap: 6px; }
@@ -1760,6 +1771,17 @@
                   <option value="0">Só a última posição</option>
                 </select>
               </div>
+              <div class="form-group" style="max-width:210px;">
+                <label>Fuso horário</label>
+                <select id="fbRemoteTz"
+                        title="Define a hora do display e o corte do dia no histórico. O campo utc de cada ponto continua em UTC.">
+                  <option value="-180" selected>Brasília (UTC−3)</option>
+                  <option value="-240">Manaus (UTC−4)</option>
+                  <option value="-300">Acre (UTC−5)</option>
+                  <option value="-120">Fernando de Noronha (UTC−2)</option>
+                  <option value="0">UTC (sem ajuste)</option>
+                </select>
+              </div>
             </div>
             <div class="btn-row">
               <button class="action-btn" id="fbRemoteOnBtn" onclick="fbRemoteEnable(true)">▶️ Ativar envio</button>
@@ -1777,7 +1799,11 @@
             <div class="form-row">
               <div class="form-group" style="max-width:240px;">
                 <label>Rede</label>
-                <input id="fbWifiSsid" type="text" placeholder="nome da rede" autocomplete="off" />
+                <!-- datalist em vez de select: dá para escolher da varredura
+                     ou digitar uma rede oculta, que não aparece na lista. -->
+                <input id="fbWifiSsid" type="text" placeholder="nome da rede"
+                       autocomplete="off" list="fbWifiRedes" />
+                <datalist id="fbWifiRedes"></datalist>
               </div>
               <div class="form-group" style="max-width:240px;">
                 <label>Senha</label>
@@ -1785,10 +1811,14 @@
               </div>
             </div>
             <div class="btn-row">
+              <button class="action-btn secondary" id="espScanBtn" onclick="espWifiScan()">📡 Buscar redes</button>
               <button class="action-btn" onclick="espWifiMudar()">📶 Mudar Wi-Fi</button>
               <button class="action-btn secondary" onclick="espWifiConsultar()">🔍 Rede atual</button>
               <button class="action-btn secondary" onclick="espWifiApagar()">🗑️ Esquecer rede</button>
             </div>
+
+            <!-- Resultado da varredura: clicar escolhe a rede e foca a senha. -->
+            <div id="espRedes" class="esp-redes"></div>
             <div class="esp-nota">
               Vai pelo <b>cabo USB</b>, direto para a memória do ESP32 — a senha não passa
               pelo Firebase nem fica salva neste navegador. Exige estar conectado em
@@ -4883,6 +4913,65 @@ async function espWifiMudar() {
   else                          fbrLog(`ESP32: ${r}`, 'err');
 }
 
+// Varre as redes pelo próprio ESP32 — é o rádio dele que importa, não o do
+// PC: a rede que aparece forte aqui pode não alcançar onde o aparelho fica.
+async function espWifiScan() {
+  if (!espSerialPronta()) return;
+  const btn = document.getElementById('espScanBtn');
+  const caixa = document.getElementById('espRedes');
+  const antes = btn.textContent;
+  btn.textContent = '📡 buscando...';
+  btn.disabled = true;
+  caixa.innerHTML = '';
+
+  const redes = [];
+  // O firmware emite uma linha por rede e fecha com '@SCAN:FIM <n>'. O waiter
+  // vê todas as linhas, então acumula no caminho e só resolve no fechamento.
+  const parar = waitFor(l => {
+    const t = l.trim();
+    if (t.startsWith('@SCAN:NET ')) {
+      try { redes.push(JSON.parse(t.slice(10))); } catch (_) {}
+    }
+    return t.startsWith('@SCAN:FIM') || t.startsWith('@SCAN:JA_RODANDO');
+  }, 25000);
+
+  await writeRaw('@SCAN\r\n');
+  const fim = await parar;
+  btn.textContent = antes;
+  btn.disabled = false;
+
+  if (!fim) { fbrLog('ESP32 nao respondeu a varredura.', 'err'); return; }
+  if (fim.includes('JA_RODANDO')) { fbrLog('Varredura ja em andamento — tente de novo em alguns segundos.', 'warn'); return; }
+  if (!redes.length) { fbrLog('Nenhuma rede encontrada pelo ESP32.', 'warn'); return; }
+
+  // Mais forte primeiro, sem repetir SSID (roteador mesh aparece várias vezes).
+  redes.sort((a, b) => b.rssi - a.rssi);
+  const vistos = new Set();
+  const lista = redes.filter(r => r.ssid && !vistos.has(r.ssid) && vistos.add(r.ssid));
+
+  const atual = (document.getElementById('fbWifiSsid').value || '').trim();
+  const dl = document.getElementById('fbWifiRedes');
+  dl.innerHTML = lista.map(r => `<option value="${r.ssid.replace(/"/g, '&quot;')}"></option>`).join('');
+
+  for (const r of lista) {
+    const el = document.createElement('div');
+    el.className = 'esp-rede' + (r.ssid === atual ? ' atual' : '');
+    el.title = `${r.rssi} dBm${r.aberta ? ' · rede aberta' : ''}`;
+    const barras = r.rssi >= -55 ? '▂▄▆█' : r.rssi >= -67 ? '▂▄▆' : r.rssi >= -78 ? '▂▄' : '▂';
+    el.innerHTML = `<span class="cadeado">${r.aberta ? '🔓' : '🔒'}</span>`
+                 + `<span>${r.ssid.replace(/</g, '&lt;')}</span>`
+                 + `<span class="rssi">${barras} ${r.rssi}</span>`;
+    el.onclick = () => {
+      document.getElementById('fbWifiSsid').value = r.ssid;
+      document.querySelectorAll('#espRedes .esp-rede').forEach(x => x.classList.remove('atual'));
+      el.classList.add('atual');
+      document.getElementById('fbWifiPass').focus();
+    };
+    caixa.appendChild(el);
+  }
+  fbrLog(`${lista.length} rede(s) encontrada(s) pelo ESP32. Clique numa para preencher.`, 'ok');
+}
+
 async function espWifiConsultar() {
   if (!espSerialPronta()) return;
   const resp = waitFor(l => l.startsWith('@WIFI:'), 6000);
@@ -4908,12 +4997,14 @@ async function fbRemoteApplyParams() {
     minDist:     fbrNum('fbRemoteMinDist', 0, 10000, 0),
     statusEvery: fbrNum('fbRemoteStatusEvery', 10, 3600, 60),
     track:       document.getElementById('fbRemoteTrack').value === '1',
+    tz:          parseInt(document.getElementById('fbRemoteTz').value, 10) || 0,
   };
   try {
     if (!await fbrPatchConfig(p)) return;
     fbLog(`Parâmetros gravados em ${fbRemoteDevice()}: ${JSON.stringify(p)}`, 'ok');
     fbrLog(`>> parametros: publicar a cada ${p.interval}s, distancia minima ${p.minDist} m, `
-         + `heartbeat ${p.statusEvery}s, historico ${p.track ? 'on' : 'off'} — valem no proximo ciclo`, 'warn');
+         + `heartbeat ${p.statusEvery}s, historico ${p.track ? 'on' : 'off'}, `
+         + `fuso UTC${p.tz/60 >= 0 ? '+' : ''}${p.tz/60} — valem no proximo ciclo`, 'warn');
     setTimeout(fbRemoteRefresh, 1500);
   } catch (e) {
     fbLog(`Falha ao gravar parâmetros: ${e.message}`, 'err');
@@ -4931,6 +5022,7 @@ async function fbRemoteLoadConfig() {
     if (cfg.minDist     !== undefined) document.getElementById('fbRemoteMinDist').value = cfg.minDist;
     if (cfg.statusEvery !== undefined) document.getElementById('fbRemoteStatusEvery').value = cfg.statusEvery;
     if (cfg.track       !== undefined) document.getElementById('fbRemoteTrack').value = cfg.track ? '1' : '0';
+    if (cfg.tz          !== undefined) document.getElementById('fbRemoteTz').value = String(cfg.tz);
     fbrLog(`config lido de ${dev}: ${JSON.stringify(cfg)}`, 'ok');
   } catch (e) {
     fbrLog(`falha ao ler config: ${e.message}`, 'err');
