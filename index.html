@@ -1812,6 +1812,14 @@
                   <option value="0">Só a última posição</option>
                 </select>
               </div>
+              <div class="form-group" style="max-width:190px;">
+                <label>Display</label>
+                <select id="fbRemoteDisplay"
+                        title="Padrão desligado. Sem display o firmware não inicializa o SPI, não monta o estado da tela e não baixa tiles do mapa — nada disso consome tempo do ESP32.">
+                  <option value="0" selected>Sem tela (padrão)</option>
+                  <option value="1">Com tela acoplada</option>
+                </select>
+              </div>
               <div class="form-group" style="max-width:210px;">
                 <label>Fuso horário</label>
                 <select id="fbRemoteTz"
@@ -5075,13 +5083,15 @@ async function fbRemoteApplyParams() {
     statusEvery: fbrNum('fbRemoteStatusEvery', 10, 3600, 60),
     track:       document.getElementById('fbRemoteTrack').value === '1',
     tz:          parseInt(document.getElementById('fbRemoteTz').value, 10) || 0,
+    display:     document.getElementById('fbRemoteDisplay').value === '1',
   };
   try {
     if (!await fbrPatchConfig(p)) return;
     fbLog(`Parâmetros gravados em ${fbRemoteDevice()}: ${JSON.stringify(p)}`, 'ok');
     fbrLog(`>> parametros: publicar a cada ${p.interval}s, distancia minima ${p.minDist} m, `
          + `heartbeat ${p.statusEvery}s, historico ${p.track ? 'on' : 'off'}, `
-         + `fuso UTC${p.tz/60 >= 0 ? '+' : ''}${p.tz/60} — valem no proximo ciclo`, 'warn');
+         + `fuso UTC${p.tz/60 >= 0 ? '+' : ''}${p.tz/60}, display ${p.display ? 'on' : 'off'} `
+         + '— valem no proximo ciclo', 'warn');
     setTimeout(fbRemoteRefresh, 1500);
   } catch (e) {
     fbLog(`Falha ao gravar parâmetros: ${e.message}`, 'err');
@@ -5100,6 +5110,7 @@ async function fbRemoteLoadConfig() {
     if (cfg.statusEvery !== undefined) document.getElementById('fbRemoteStatusEvery').value = cfg.statusEvery;
     if (cfg.track       !== undefined) document.getElementById('fbRemoteTrack').value = cfg.track ? '1' : '0';
     if (cfg.tz          !== undefined) document.getElementById('fbRemoteTz').value = String(cfg.tz);
+    if (cfg.display     !== undefined) document.getElementById('fbRemoteDisplay').value = cfg.display ? '1' : '0';
     fbrLog(`config lido de ${dev}: ${JSON.stringify(cfg)}`, 'ok');
   } catch (e) {
     fbrLog(`falha ao ler config: ${e.message}`, 'err');

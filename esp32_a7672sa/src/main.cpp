@@ -132,6 +132,10 @@ static void logf(const char* fmt, ...) {
 // cru. Enquanto isso o firmware para de mandar comandos por conta própria —
 // dois mestres na mesma UART fazem as respostas se cruzarem.
 static bool ponteAtiva = false;
+
+// Há tela acoplada nesta unidade? Vem da NVS no boot e do /config depois.
+// Declarado aqui em cima porque entrarPonte(), logo abaixo, já consulta.
+static bool displayAtivo = true;
 static String usbLinha;
 
 static void entrarPonte(bool on) {
@@ -141,8 +145,10 @@ static void entrarPonte(bool on) {
   // Em ponte o loop não chega até a tela, e o firmware nem lê mais o NMEA:
   // manter o mapa antigo no display faria parecer travado, com dados velhos.
   // Dizer o que está acontecendo é mais honesto que congelar.
-  if (on) ui.splash("MODO PONTE", "o app esta no controle do modulo");
-  else    ui.forcarRedesenho();
+  if (displayAtivo) {
+    if (on) ui.splash("MODO PONTE", "o app esta no controle do modulo");
+    else    ui.forcarRedesenho();
+  }
 
   Serial.println(on ? "@BRIDGE:ON" : "@BRIDGE:OFF");
 }
@@ -358,12 +364,23 @@ void setup() {
   Serial.println();
   logf("=== A7672SA / ESP32 ===");
 
-  // O display sobe antes de tudo: se o módulo não responder, a tela é o único
-  // lugar onde o motivo aparece para quem está com o aparelho na mão.
-  ui.begin();
-  ui.splash("Rastreador GPS", "iniciando...");
-  if (mapa.begin()) logf("Cache de mapa: %u tiles no LittleFS.", (unsigned)mapa.tilesEmCache());
-  else              logf("Cache de mapa indisponivel: %s", mapa.ultimoErro().c_str());
+  // Desligado por padrão: a maioria das unidades não leva tela, e ligar o que
+  // não existe custaria SPI, cache de mapa e tempo de loop à toa. Quem tem
+  // display ativa uma vez pelo app e a NVS lembra — a decisão precisa estar
+  // tomada antes de haver rede para ler o banco.
+  displayAtivo = A7672Firebase::displaySalvo(false);
+
+  if (displayAtivo) {
+    ui.begin();
+    ui.splash("Rastreador GPS", "iniciando...");
+    if (mapa.begin()) logf("Cache de mapa: %u tiles no LittleFS.", (unsigned)mapa.tilesEmCache());
+    else              logf("Cache de mapa indisponivel: %s", mapa.ultimoErro().c_str());
+  } else {
+    logf("Display DESATIVADO (padrao). Nem SPI, nem mapa, nem tiles.");
+    logf("       Tem tela nesta unidade? Ative na aba ESP32 do app.");
+    pinMode(TFT_BL, OUTPUT);
+    digitalWrite(TFT_BL, LOW);   // backlight apagado consome de verdade menos
+  }
 
   // Wi-Fi serve só para encher o cache de tiles; nada do rastreamento depende
   // dele. A rede configurada pelo app (guardada na NVS) tem precedência sobre
@@ -502,7 +519,7 @@ void loop() {
     // estática e o aparelho continua parecendo travado.
     static uint32_t pisca = 0;
     static bool aceso = false;
-    if (millis() - pisca > 1200) {
+    if (displayAtivo && millis() - pisca > 1200) {
       pisca = millis();
       aceso = !aceso;
       tft.fillCircle(462, 302, 5, aceso ? 0x3D7F : 0x0861);
@@ -535,6 +552,22 @@ void loop() {
                                                     : "Envio desativado pelo app");
     }
 
+    // Display ligado/desligado pelo app, sem precisar reiniciar.
+    if (firebase.displayLigado() != displayAtivo) {
+      displayAtivo = firebase.displayLigado();
+      logf("COMANDO do app: display %s.", displayAtivo ? "ATIVADO" : "DESATIVADO");
+      firebase.remoteLog("info", displayAtivo ? "Display ativado" : "Display desativado");
+      if (displayAtivo) {
+        ui.begin();
+        mapa.begin();
+        ui.forcarRedesenho();
+      } else {
+        // Só parar de desenhar deixaria a última tela acesa para sempre.
+        tft.fillScreen(0x0000);
+        pinMode(TFT_BL, OUTPUT);
+        digitalWrite(TFT_BL, LOW);
+      }
+    }
   }
 
   // ── Envio periódico ─────────────────────────────────────────
@@ -584,8 +617,10 @@ void loop() {
   }
 
   // ── Tela ────────────────────────────────────────────────────
+  // Sem display, nem o UiEstado é montado: ele constrói Strings a cada meio
+  // segundo e não haveria para quem mostrar.
   static uint32_t lastUi = 0;
-  if (millis() - lastUi > 500) {
+  if (displayAtivo && millis() - lastUi > 500) {
     lastUi = millis();
     const GnssFix& f = gnss.fix();
     UiEstado e;
@@ -608,8 +643,10 @@ void loop() {
   // uma requisição HTTPS que segura o loop por 1 a 3 s, e nesse tempo o
   // display não atualiza e o NMEA se acumula. Encher o cache é o trabalho
   // menos urgente que este firmware tem.
+  // Tiles existem só para o mapa: sem tela, baixar seria gastar Wi-Fi, flash
+  // e tempo de loop para nada.
   static uint32_t lastTile = 0;
-  if (WiFi.status() == WL_CONNECTED && gnss.fix().valid
+  if (displayAtivo && WiFi.status() == WL_CONNECTED && gnss.fix().valid
       && millis() - lastTile > 5000) {
     lastTile = millis();
     const GnssFix& f = gnss.fix();

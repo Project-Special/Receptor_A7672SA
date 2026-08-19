@@ -251,6 +251,14 @@ bool A7672Firebase::fetchConfig() {
   String tz = jsonRaw(body, "tz");
   if (tz.length()) _tzMin = tz.toInt();
 
+  String dp = jsonRaw(body, "display");
+  if (dp.length()) {
+    bool novo = (dp == "true" || dp == "1");
+    // Só grava quando muda: a NVS tem ciclos de escrita contados e o config é
+    // lido a cada 30 s.
+    if (novo != _display) { _display = novo; displaySalvar(novo); }
+  }
+
   return true;
 }
 
@@ -264,6 +272,23 @@ bool A7672Firebase::wifiSalvo(String& ssid, String& pass) {
   pass = p.getString(kNvsPass, "");
   p.end();
   return ssid.length() > 0;
+}
+
+static const char* kNvsDisp = "display";
+
+bool A7672Firebase::displaySalvo(bool padrao) {
+  Preferences p;
+  if (!p.begin(kNvsSpace, true)) return padrao;
+  bool v = p.getBool(kNvsDisp, padrao);
+  p.end();
+  return v;
+}
+
+void A7672Firebase::displaySalvar(bool on) {
+  Preferences p;
+  if (!p.begin(kNvsSpace, false)) return;
+  p.putBool(kNvsDisp, on);
+  p.end();
 }
 
 bool A7672Firebase::wifiSalvar(const String& ssid, const String& pass) {

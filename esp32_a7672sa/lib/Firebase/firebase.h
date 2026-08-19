@@ -99,6 +99,14 @@ public:
   void setTzMinutes(int m) { _tzMin = m; }
   int  tzMinutes() const   { return _tzMin; }
 
+  // Tem display acoplado? Desligado por padrão: a maioria das unidades não
+  // leva tela, e ligar o que não existe custaria SPI, cache de mapa e tempo
+  // de loop à toa. A preferência fica na NVS porque o boot precisa dela antes
+  // de haver rede para ler o banco.
+  bool displayLigado() const { return _display; }
+  static bool displaySalvo(bool padrao = false);
+  static void displaySalvar(bool on);
+
   // Nó do dia dentro do histórico: "2026-08-18", ou "sem-data" enquanto o
   // receptor ainda não entregou a data.
   static String dayKey(const String& iso);
@@ -126,6 +134,7 @@ private:
   uint32_t _statusEvery = 0;
   float _minDist = 0;             // metros; 0 = envia todo ciclo
   int _tzMin = -180;              // Brasília por padrão
+  bool _display = false;
   double _lastLat = 0, _lastLon = 0;
   bool _temUltimo = false;
 };
