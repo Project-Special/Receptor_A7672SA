@@ -2,8 +2,12 @@
 
 bool A7672Core::begin(HardwareSerial& port, int rxPin, int txPin, uint32_t baud) {
   _ser = &port;
+  // Antes do begin(), obrigatoriamente: com a UART já rodando o core recusa o
+  // redimensionamento ("RX Buffer can't be resized when Serial is already
+  // running") e devolve 0, deixando o buffer no default. Respostas de
+  // HTTPREAD e o stream NMEA chegam em rajada e estouram esse default.
+  _ser->setRxBufferSize(2048);
   _ser->begin(baud, SERIAL_8N1, rxPin, txPin);
-  _ser->setRxBufferSize(2048);   // respostas de HTTPREAD chegam em rajada
   _buf.reserve(256);
   return true;
 }
