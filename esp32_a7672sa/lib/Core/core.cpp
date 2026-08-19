@@ -60,9 +60,29 @@ bool A7672Core::waitReady(uint32_t timeoutMs) {
   return false;
 }
 
+// Credenciais não vão para o log. O idToken do Firebase viaja na query das
+// requisições e tem ~860 caracteres: sem isto, cada envio despejava no monitor
+// um token válido por uma hora, que dá acesso de escrita ao banco. Quem lê o
+// serial não deveria sair dali com credencial na mão.
+static String semSegredos(const String& s) {
+  static const char* chaves[] = { "auth=", "key=", "refresh_token=" };
+  int corte = -1;
+  for (const char* k : chaves) {
+    int i = s.indexOf(k);
+    if (i >= 0) { i += strlen(k); if (corte < 0 || i < corte) corte = i; }
+  }
+  if (corte < 0) return s;
+
+  // Preserva o que vem depois do segredo (o " HTTP/1.1" da request-line).
+  int fim = corte;
+  while (fim < (int)s.length() && s[fim] != ' ' && s[fim] != '&' && s[fim] != '\r') fim++;
+  if (fim - corte < 12) return s;   // curto demais para ser credencial
+  return s.substring(0, corte) + "***" + s.substring(fim);
+}
+
 void A7672Core::write(const String& s) {
   if (!_ser) return;
-  if (_dbg) { _dbg->print(F(">> ")); _dbg->println(s); }
+  if (_dbg) { _dbg->print(F(">> ")); _dbg->println(semSegredos(s)); }
   _ser->print(s);
 }
 

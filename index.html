@@ -737,6 +737,7 @@
   <span class="conn-label">Interface:</span>
   <select id="connMode" onchange="onConnModeChange()">
     <option value="serial" selected>Serial (USB/UART)</option>
+    <option value="esp32">ESP32 (ponte USB)</option>
     <option value="websocket">WebSocket Bridge (Python)</option>
     <option value="simulator">Simulador (sem hardware)</option>
   </select>
@@ -2175,6 +2176,21 @@ async function connect() {
   else if (mode === 'simulator') enterSimulationMode();
   else await connectSerial();
 
+  // O ESP32 e o app disputariam a UART do módulo. '@BRIDGE' faz o firmware
+  // sair de cena e virar um cabo: ele para de mandar comandos e repassa bytes
+  // crus nos dois sentidos, até receber '@NORMAL'.
+  if (connected && mode === 'esp32') {
+    log('sys', 'Pedindo modo ponte ao ESP32 (@BRIDGE)...', 'info');
+    const pronto = waitFor(l => l.startsWith('@BRIDGE:ON'), 6000);
+    await writeRaw('@BRIDGE\r\n');
+    if (await pronto) {
+      log('sys', 'ESP32 em modo ponte: os comandos AT vão direto ao módulo.', 'ok');
+    } else {
+      log('sys', 'ESP32 não confirmou o modo ponte. Ele está gravado com firmware que suporta @BRIDGE?', 'err');
+      log('sys', 'Enquanto isso o firmware segue no controle e os comandos daqui serão ignorados.', 'info');
+    }
+  }
+
   if (connected && document.getElementById('autoInitChk')?.checked) {
     await delay(400);
     // Se o módulo não respondeu, não adianta seguir para o GNSS.
@@ -2290,6 +2306,12 @@ function fillPortList(ports) {
 
 async function disconnect() {
   stopAllTimers();
+  // Devolve o controle ao firmware antes de largar a porta: sem isto o ESP32
+  // ficaria em ponte para sempre e pararia de rastrear em silêncio.
+  if (connected && getConnMode() === 'esp32') {
+    try { await writeRaw('@NORMAL\r\n'); await delay(250); } catch (_) {}
+    log('sys', 'ESP32 devolvido ao modo normal (@NORMAL).', 'info');
+  }
   try {
     if (connectedTransport === 'serial') {
       if (reader) { await reader.cancel(); reader = null; }
@@ -2620,6 +2642,10 @@ function onConnModeChange() {
   detect.style.display = isSim ? 'none' : '';
   if (isSim) { info.textContent = 'Simulador — nada é enviado ao hardware'; }
   else if (isWs) { detect.textContent = '🔍 Listar portas (bridge)'; info.textContent = 'Rode: python a7672_bridge.py'; }
+  else if (mode === 'esp32') {
+    detect.textContent = '🔍 Detectar Portas';
+    info.textContent = 'Porta USB do ESP32 (CH340/CP210x) — ele repassa os AT ao módulo';
+  }
   else { detect.textContent = '🔍 Detectar Portas'; info.textContent = ''; }
 }
 

@@ -96,6 +96,48 @@ static void logf(const char* fmt, ...) {
   Serial.printf("[%4lu.%03lu] %s\n", (unsigned long)(ms / 1000), (unsigned long)(ms % 1000), buf);
 }
 
+// ── Ponte USB <-> módulo ─────────────────────────────────────
+// O A7672 tem uma UART só. Com o ESP32 ligado nela, falar AT pelo PC exigia
+// desconectar o ESP32 e plugar um FTDI no módulo. Em modo ponte o ESP32 vira
+// um cabo: o que chega do PC vai para o módulo e o que volta sobe para o PC,
+// cru. Enquanto isso o firmware para de mandar comandos por conta própria —
+// dois mestres na mesma UART fazem as respostas se cruzarem.
+static bool ponteAtiva = false;
+static String usbLinha;
+
+static void entrarPonte(bool on) {
+  ponteAtiva = on;
+  modem.setDebug(on ? nullptr : &Serial);   // o eco "<<" atrapalharia o parser do app
+  Serial.println(on ? "@BRIDGE:ON" : "@BRIDGE:OFF");
+}
+
+static void pumpUsb() {
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+
+    // As linhas de controle começam com '@' e nunca chegam ao módulo.
+    if (c == '\n' || c == '\r') {
+      String cmd = usbLinha;
+      usbLinha = "";
+      cmd.trim();
+      if (cmd == "@BRIDGE")      { entrarPonte(true);  continue; }
+      if (cmd == "@NORMAL")      { entrarPonte(false); continue; }
+      if (cmd == "@PING")        { Serial.println(ponteAtiva ? "@BRIDGE:ON" : "@BRIDGE:OFF"); continue; }
+      if (ponteAtiva && cmd.length()) modem.write(cmd + "\r\n");
+      continue;
+    }
+
+    // Ctrl+Z e ESC terminam SMS e HTTPDATA: precisam passar sem virar linha.
+    if (ponteAtiva && (c == 0x1A || c == 0x1B)) {
+      if (usbLinha.length()) { modem.write(usbLinha); usbLinha = ""; }
+      modem.write(String(c));
+      continue;
+    }
+
+    if (usbLinha.length() < 512) usbLinha += c;
+  }
+}
+
 static void printFix(const GnssFix& f) {
   if (!f.valid) {
     logf("GNSS: sem fix ainda (TTFF a frio leva 30-90 s com vista para o ceu)");
@@ -240,9 +282,21 @@ void setup() {
   logf("=== inicializacao concluida ===");
   logf("Envio %s. Use o botao 'Ativar envio' na aba Firebase do app para mudar.",
        firebase.enabled() ? "ATIVO" : "PARADO (aguardando comando do app)");
+  logf("Ponte: mande '@BRIDGE' por esta serial para falar AT com o modulo "
+       "atraves do ESP32, e '@NORMAL' para devolver o controle ao firmware.");
 }
 
 void loop() {
+  pumpUsb();
+
+  // Em modo ponte o firmware sai de cena: repassa os bytes crus e não toca em
+  // nada. Deixar o pump() rodar aqui comeria as respostas antes de chegarem ao
+  // PC, e o envio periódico disputaria a UART com quem está do outro lado.
+  if (ponteAtiva) {
+    while (Serial2.available()) Serial.write((char)Serial2.read());
+    return;
+  }
+
   // Sem comando em andamento, é aqui que as URCs (NMEA, +CMTI, RING) são lidas.
   modem.pump(50);
 
