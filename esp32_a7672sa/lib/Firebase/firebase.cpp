@@ -202,6 +202,15 @@ bool A7672Firebase::fetchConfig() {
   String iv = jsonRaw(body, "interval");
   if (iv.length()) _remoteInterval = (uint32_t)iv.toInt();
 
+  String tk = jsonRaw(body, "track");
+  if (tk.length()) _track = (tk == "true" || tk == "1");
+
+  String md = jsonRaw(body, "minDist");
+  if (md.length()) _minDist = md.toFloat();
+
+  String se = jsonRaw(body, "statusEvery");
+  if (se.length()) _statusEvery = (uint32_t)se.toInt();
+
   return true;
 }
 
@@ -248,11 +257,33 @@ String A7672Firebase::dayKey(const String& iso) {
   return iso.substring(0, 10);
 }
 
+// Distância em metros entre dois pontos (Haversine).
+static double metrosEntre(double lat1, double lon1, double lat2, double lon2) {
+  const double R = 6371000.0, rad = PI / 180.0;
+  double dLat = (lat2 - lat1) * rad, dLon = (lon2 - lon1) * rad;
+  double a = sin(dLat / 2) * sin(dLat / 2)
+           + cos(lat1 * rad) * cos(lat2 * rad) * sin(dLon / 2) * sin(dLon / 2);
+  return 2 * R * asin(sqrt(a));
+}
+
 bool A7672Firebase::sendFix(const GnssFix& fix) {
   if (!fix.valid) {
     _lastError = "Sem fix valido";
     return false;
   }
+
+  // Parado, o GPS oscila alguns metros e cada oscilação viraria um ponto novo:
+  // um aparelho na bancada gerava ~2.880 escritas por dia sem sair do lugar.
+  // O filtro compara com o último ponto ENVIADO, não com o anterior, senão
+  // uma deriva lenta passaria ponto a ponto.
+  if (_minDist > 0 && _temUltimo) {
+    double d = metrosEntre(_lastLat, _lastLon, fix.lat, fix.lon);
+    if (d < _minDist) {
+      _lastError = "Parado (" + String(d, 1) + " m < " + String(_minDist, 0) + " m)";
+      return false;
+    }
+  }
+
   if (!ensureAuth()) return false;
 
   String utc = isoTimestamp(fix.utcDate, fix.utcTime);
@@ -276,6 +307,11 @@ bool A7672Firebase::sendFix(const GnssFix& fix) {
   // A última posição sobrescreve (PUT); o histórico acumula (POST gera a chave)
   // dentro do nó do dia, de modo que cada data vira um bloco separado.
   bool okLast = put(base + "/last.json", json, "PUT");
+
+  // Só conta como enviado o que de fato subiu: marcar antes faria uma falha de
+  // rede "consumir" o deslocamento e o ponto seguinte seria filtrado à toa.
+  if (okLast) { _lastLat = fix.lat; _lastLon = fix.lon; _temUltimo = true; }
+
   if (!_track) return okLast;
 
   bool okTrack = put(base + "/track/" + dayKey(utc) + ".json", json, "POST");

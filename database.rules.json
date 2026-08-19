@@ -26,9 +26,12 @@
         },
 
         "config": {
-          "enabled":  { ".validate": "newData.isBoolean()" },
-          "interval": { ".validate": "newData.isNumber() && newData.val() >= 5 && newData.val() <= 3600" },
-          "$outro":   { ".validate": "newData.isNumber() || newData.isString() || newData.isBoolean()" }
+          "enabled":     { ".validate": "newData.isBoolean()" },
+          "track":       { ".validate": "newData.isBoolean()" },
+          "interval":    { ".validate": "newData.isNumber() && newData.val() >= 5 && newData.val() <= 3600" },
+          "statusEvery": { ".validate": "newData.isNumber() && newData.val() >= 10 && newData.val() <= 3600" },
+          "minDist":     { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10000" },
+          "$outro":      { ".validate": "newData.isNumber() || newData.isString() || newData.isBoolean()" }
         },
 
         "status": {

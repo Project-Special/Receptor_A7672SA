@@ -54,8 +54,11 @@ public:
   // O device deve estar enviando posições? Vem do config lido do banco.
   bool enabled() const { return _enabled; }
 
-  // Intervalo pedido pelo app, em segundos. 0 = usar o padrão do firmware.
+  // Parâmetros vindos de /config. 0 significa "usar o padrão do firmware".
   uint32_t remoteInterval() const { return _remoteInterval; }
+  uint32_t statusEvery() const    { return _statusEvery; }
+  bool     trackEnabled() const   { return _track; }
+  float    minDistance() const    { return _minDist; }
 
   // Registra um evento em /devices/<id>/logs para o app mostrar.
   // `level`: "info", "warn" ou "erro".
@@ -93,4 +96,8 @@ private:
   bool _track = true;
   bool _enabled = false;          // só envia depois que o app autorizar
   uint32_t _remoteInterval = 0;
+  uint32_t _statusEvery = 0;
+  float _minDist = 0;             // metros; 0 = envia todo ciclo
+  double _lastLat = 0, _lastLon = 0;
+  bool _temUltimo = false;
 };

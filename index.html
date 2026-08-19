@@ -1683,19 +1683,40 @@
           <h3 style="margin-top:6px;">Rastreador ESP32 — controle remoto</h3>
 
           <div class="form-row">
-            <div class="form-group" style="max-width:220px;">
+            <div class="form-group" style="max-width:200px;">
               <label>Device do ESP32</label>
-              <input id="fbRemoteDevice" type="text" value="esp32-01" />
+              <input id="fbRemoteDevice" type="text" value="esp32-01" onchange="fbRemoteLoadConfig()" />
+            </div>
+            <div class="form-group" style="max-width:150px;">
+              <label>Publicar a cada (s)</label>
+              <input id="fbRemoteInterval" type="number" min="5" max="3600" value="30" />
             </div>
             <div class="form-group" style="max-width:170px;">
-              <label>Intervalo do ESP32 (s)</label>
-              <input id="fbRemoteInterval" type="number" min="5" max="3600" value="30" />
+              <label>Distância mínima (m)</label>
+              <input id="fbRemoteMinDist" type="number" min="0" max="10000" value="0"
+                     title="0 envia todo ciclo. Parado, o GPS oscila alguns metros e cada oscilação vira um ponto novo; 10 a 25 m corta isso." />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group" style="max-width:170px;">
+              <label>Heartbeat (s)</label>
+              <input id="fbRemoteStatusEvery" type="number" min="10" max="3600" value="60" />
+            </div>
+            <div class="form-group" style="max-width:210px;">
+              <label>Histórico no ESP32</label>
+              <select id="fbRemoteTrack">
+                <option value="1" selected>Última + histórico do dia</option>
+                <option value="0">Só a última posição</option>
+              </select>
             </div>
           </div>
 
           <div class="btn-row">
             <button class="action-btn" id="fbRemoteOnBtn" onclick="fbRemoteEnable(true)">▶️ Ativar envio</button>
             <button class="action-btn secondary" onclick="fbRemoteEnable(false)">⏹️ Desativar envio</button>
+            <button class="action-btn" onclick="fbRemoteApplyParams()">💾 Aplicar parâmetros</button>
+            <button class="action-btn secondary" onclick="fbRemoteLoadConfig()">📥 Ler config do device</button>
             <button class="action-btn secondary" onclick="fbRemoteRefresh()">🔄 Atualizar status</button>
             <button class="action-btn secondary" id="fbRemoteAutoBtn" onclick="fbRemoteAutoToggle()">👁️ Monitorar</button>
             <button class="action-btn secondary" onclick="fbRemoteClearLogs()">🗑️ Limpar logs</button>
@@ -4687,23 +4708,66 @@ function fbrLog(msg, cls = '') {
   box.scrollTop = box.scrollHeight;
 }
 
-async function fbRemoteEnable(on) {
-  const c = firebaseCfg();
-  if (!c.host || !c.key) { alert('Preencha o host do banco e a Web API Key.'); return; }
-  const dev = fbRemoteDevice();
-  const intervalo = Math.min(3600, Math.max(5,
-    parseInt(document.getElementById('fbRemoteInterval').value, 10) || 30));
+function fbrNum(id, min, max, padrao) {
+  const v = parseInt(document.getElementById(id).value, 10);
+  return isNaN(v) ? padrao : Math.min(max, Math.max(min, v));
+}
 
+// PATCH, nao PUT: o PUT substitui o no inteiro, entao ativar o envio apagaria
+// os parametros ja configurados (e um firmware mais novo perderia campos que
+// esta versao do app nem conhece).
+async function fbrPatchConfig(campos) {
+  const c = firebaseCfg();
+  if (!c.host || !c.key) { alert('Preencha o host do banco e a Web API Key.'); return false; }
+  await fbWrite(`/devices/${encodeURIComponent(fbRemoteDevice())}/config.json`, campos, 'PATCH');
+  return true;
+}
+
+async function fbRemoteEnable(on) {
   try {
-    await fbWrite(`/devices/${encodeURIComponent(dev)}/config.json`,
-                  { enabled: !!on, interval: intervalo }, 'PUT');
-    fbLog(`Comando enviado: ${dev} -> envio ${on ? 'ATIVADO' : 'DESATIVADO'} (${intervalo}s).`, 'ok');
+    if (!await fbrPatchConfig({ enabled: !!on })) return;
+    fbLog(`Comando enviado: ${fbRemoteDevice()} -> envio ${on ? 'ATIVADO' : 'DESATIVADO'}.`, 'ok');
     // O device so obedece no proximo poll dele; dizer isso evita a leitura de
     // que o comando falhou quando o status ainda mostra o valor antigo.
     fbrLog(`>> comando: envio ${on ? 'ATIVADO' : 'DESATIVADO'} — o ESP32 aplica no proximo ciclo (ate ~30 s)`, 'warn');
     setTimeout(fbRemoteRefresh, 1500);
   } catch (e) {
     fbLog(`Falha ao enviar comando: ${e.message}`, 'err');
+  }
+}
+
+async function fbRemoteApplyParams() {
+  const p = {
+    interval:    fbrNum('fbRemoteInterval', 5, 3600, 30),
+    minDist:     fbrNum('fbRemoteMinDist', 0, 10000, 0),
+    statusEvery: fbrNum('fbRemoteStatusEvery', 10, 3600, 60),
+    track:       document.getElementById('fbRemoteTrack').value === '1',
+  };
+  try {
+    if (!await fbrPatchConfig(p)) return;
+    fbLog(`Parâmetros gravados em ${fbRemoteDevice()}: ${JSON.stringify(p)}`, 'ok');
+    fbrLog(`>> parametros: publicar a cada ${p.interval}s, distancia minima ${p.minDist} m, `
+         + `heartbeat ${p.statusEvery}s, historico ${p.track ? 'on' : 'off'} — valem no proximo ciclo`, 'warn');
+    setTimeout(fbRemoteRefresh, 1500);
+  } catch (e) {
+    fbLog(`Falha ao gravar parâmetros: ${e.message}`, 'err');
+  }
+}
+
+// Traz para a tela o que esta gravado no banco, para nao editar por cima de
+// valores que outra pessoa (ou outro navegador) ja mudou.
+async function fbRemoteLoadConfig() {
+  const dev = fbRemoteDevice();
+  try {
+    const cfg = await fbGet(`/devices/${encodeURIComponent(dev)}/config.json`);
+    if (!cfg) { fbrLog(`(${dev} ainda nao tem config gravado)`, 'warn'); return; }
+    if (cfg.interval    !== undefined) document.getElementById('fbRemoteInterval').value = cfg.interval;
+    if (cfg.minDist     !== undefined) document.getElementById('fbRemoteMinDist').value = cfg.minDist;
+    if (cfg.statusEvery !== undefined) document.getElementById('fbRemoteStatusEvery').value = cfg.statusEvery;
+    if (cfg.track       !== undefined) document.getElementById('fbRemoteTrack').value = cfg.track ? '1' : '0';
+    fbrLog(`config lido de ${dev}: ${JSON.stringify(cfg)}`, 'ok');
+  } catch (e) {
+    fbrLog(`falha ao ler config: ${e.message}`, 'err');
   }
 }
 

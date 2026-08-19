@@ -221,7 +221,7 @@ void setup() {
   // ── Firebase ───────────────────────────────────────────────
   logf("Autenticando no Firebase...");
   firebase.begin(FB_API_KEY, FB_DB_HOST, FB_DEVICE);
-  firebase.setTrackEnabled(FB_TRACK);
+  firebase.setTrackEnabled(FB_TRACK);   // o /config do app pode sobrescrever
   if (firebase.ensureAuth()) {
     logf("Firebase: autenticado (usuario anonimo).");
 
@@ -285,6 +285,10 @@ void loop() {
       fbEnviados++;
       logf("Firebase: OK  %.6f, %.6f -> /devices/%s (total %lu)",
            f.lat, f.lon, FB_DEVICE, (unsigned long)fbEnviados);
+    } else if (firebase.lastError().startsWith("Parado")) {
+      // Filtrado por distância é o filtro trabalhando, não erro: não conta
+      // como falha nem gasta uma escrita de log no banco.
+      logf("Firebase: %s", firebase.lastError().c_str());
     } else {
       fbFalhas++;
       logf("Firebase: FALHA (%lu) — %s", (unsigned long)fbFalhas, firebase.lastError().c_str());
@@ -294,8 +298,10 @@ void loop() {
   }
 
   // ── Heartbeat ───────────────────────────────────────────────
+  uint32_t statusMs = firebase.statusEvery() ? firebase.statusEvery() * 1000UL
+                                             : FB_STATUS_PUSH_MS;
   static uint32_t lastPush = 0;
-  if (firebase.authenticated() && millis() - lastPush > FB_STATUS_PUSH_MS) {
+  if (firebase.authenticated() && millis() - lastPush > statusMs) {
     lastPush = millis();
     const GnssFix& f = gnss.fix();
     refreshNet(30000);
