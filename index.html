@@ -195,6 +195,10 @@
       flex-direction: column;
       gap: 14px;
       overflow-y: auto;
+      /* Item flex tem min-width:auto por padrão e não encolhe abaixo do
+         conteúdo; como o .panel corta com overflow:hidden, uma fileira larga
+         era recortada à direita em vez de quebrar. */
+      min-width: 0;
     }
 
     .pane h3 { font-size: 14px; color: var(--text-dim); font-weight: 600; }
@@ -523,7 +527,12 @@
       align-items: flex-end;
       line-height: 1.25;
     }
+    /* min-width menor que o conteúdo natural do input: sem isto os seis
+       campos somam mais que a largura útil e a fileira transbordava em vez
+       de passar para a linha de baixo. */
     #panel-esp32 .form-row { align-items: flex-end; flex-wrap: wrap; }
+    #panel-esp32 .form-row .form-group { min-width: 130px; flex: 1 1 130px; }
+    #panel-esp32 .esp-sec { min-width: 0; }
     @media (max-width: 768px) {
       /* Empilhado, cada rótulo fica junto do seu campo e a reserva sobra. */
       #panel-esp32 .form-row .form-group label { min-height: 0; }
