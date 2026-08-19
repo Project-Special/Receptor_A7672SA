@@ -1445,6 +1445,12 @@
               <option value="fb">☁️ Firebase</option>
             </select>
             <span id="mapFbControls" style="display:none;gap:6px;align-items:center;">
+              <!-- Sem isto o mapa ficava presa ao device do app e nunca
+                   mostrava a trilha gravada pelo ESP32, que usa outro ID. -->
+              <select id="mapFbDevice" onchange="mapRefreshFbDays()"
+                      style="background:var(--bg-input,#0d1117);color:var(--text);
+                             border:1px solid var(--border);border-radius:6px;padding:4px 6px;font-size:12px;">
+              </select>
               <select id="mapFbDay" onchange="mapLoadFirebaseDay()"
                       style="background:var(--bg-input,#0d1117);color:var(--text);
                              border:1px solid var(--border);border-radius:6px;padding:4px 6px;font-size:12px;">
@@ -5241,14 +5247,38 @@ async function fbGet(path) {
   return r.json();
 }
 
+// Quais devices o mapa pode mostrar: o que este navegador envia e o do ESP32.
+// As regras nao deixam listar /devices, entao a lista sai dos dois campos da
+// aba Firebase — que e onde os IDs ja estao configurados.
+function mapFbDeviceList() {
+  const doApp  = firebaseCfg().device;
+  const doEsp  = fbRemoteDevice();
+  return [...new Set([doEsp, doApp].filter(Boolean))];
+}
+
+function mapFbDevice() {
+  const sel = document.getElementById('mapFbDevice');
+  return (sel && sel.value) || mapFbDeviceList()[0] || 'esp32-01';
+}
+
+function mapFillDeviceSelect() {
+  const sel = document.getElementById('mapFbDevice');
+  if (!sel) return;
+  const atual = sel.value;
+  const lista = mapFbDeviceList();
+  sel.innerHTML = lista.map(d => `<option value="${d}">${d}</option>`).join('');
+  if (lista.includes(atual)) sel.value = atual;
+}
+
 // shallow=true traz só as chaves, sem baixar os pontos de todos os dias.
 async function mapRefreshFbDays() {
   const sel = document.getElementById('mapFbDay');
-  const c = firebaseCfg();
   if (!sel) return;
+  mapFillDeviceSelect();
+  const dev = mapFbDevice();
   setText('mapFbInfo', 'carregando dias...');
   try {
-    const dias = await fbGet(`/devices/${encodeURIComponent(c.device)}/track.json?shallow=true`);
+    const dias = await fbGet(`/devices/${encodeURIComponent(dev)}/track.json?shallow=true`);
     const chaves = dias ? Object.keys(dias).sort().reverse() : [];
     const atual = sel.value;
     sel.innerHTML = '<option value="">— dia —</option>'
@@ -5256,7 +5286,7 @@ async function mapRefreshFbDays() {
     if (chaves.includes(atual)) sel.value = atual;
 
     if (!chaves.length) {
-      setText('mapFbInfo', 'nenhum dia gravado ainda');
+      setText('mapFbInfo', `${dev}: nenhum dia gravado`);
       return;
     }
     setText('mapFbInfo', `${chaves.length} dia(s)`);
@@ -5270,11 +5300,11 @@ async function mapLoadFirebaseDay() {
   const sel = document.getElementById('mapFbDay');
   const dia = sel?.value;
   if (!dia) return;
-  const c = firebaseCfg();
+  const dev = mapFbDevice();
 
   setText('mapFbInfo', 'carregando...');
   try {
-    const dados = await fbGet(`/devices/${encodeURIComponent(c.device)}/track/${encodeURIComponent(dia)}.json`);
+    const dados = await fbGet(`/devices/${encodeURIComponent(dev)}/track/${encodeURIComponent(dia)}.json`);
     if (!dados) { setText('mapFbInfo', 'dia vazio'); return; }
 
     // As chaves geradas pelo POST já são cronológicas; o utc só desempata
@@ -5321,8 +5351,8 @@ async function mapLoadFirebaseDay() {
     setMapFollow(false);
     mapObj.fitBounds(fbLine.getBounds(), { padding: [24, 24] });
     setText('mapFbInfo', `${pontos.length} pontos · ${km.toFixed(2)} km`);
-    setText('map-coord', `${dia} — ${pontos.length} pontos do Firebase`);
-    log('sys', `Firebase: ${dia} carregado (${pontos.length} pontos, ${km.toFixed(2)} km).`, 'ok');
+    setText('map-coord', `${dev} · ${dia} — ${pontos.length} pontos do Firebase`);
+    log('sys', `Firebase: ${dev} ${dia} carregado (${pontos.length} pontos, ${km.toFixed(2)} km).`, 'ok');
   } catch (e) {
     setText('mapFbInfo', e.message);
     log('sys', `Firebase: falha ao carregar ${dia} — ${e.message}`, 'err');
