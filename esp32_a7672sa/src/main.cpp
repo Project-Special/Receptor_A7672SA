@@ -137,10 +137,21 @@ static String usbLinha;
 static void entrarPonte(bool on) {
   ponteAtiva = on;
   modem.setDebug(on ? nullptr : &Serial);   // o eco "<<" atrapalharia o parser do app
+
+  // Em ponte o loop não chega até a tela, e o firmware nem lê mais o NMEA:
+  // manter o mapa antigo no display faria parecer travado, com dados velhos.
+  // Dizer o que está acontecendo é mais honesto que congelar.
+  if (on) ui.splash("MODO PONTE", "o app esta no controle do modulo");
+  else    ui.forcarRedesenho();
+
   Serial.println(on ? "@BRIDGE:ON" : "@BRIDGE:OFF");
 }
 
-static void conectarWifi();
+// Reconexão pedida pelo app. O loop cuida dela; o handler da serial não pode
+// esperar associação de Wi-Fi (até 10 s) porque nesse tempo o display congela
+// e a própria serial deixa de ser lida — era o que fazia as respostas do
+// @WIFI se perderem.
+static bool wifiReconectar = false;
 
 // Configuração de Wi-Fi pelo cabo, não pelo banco. A senha de uma rede não
 // tem por que subir para a nuvem — ainda mais neste projeto, cuja Web API Key
@@ -179,12 +190,11 @@ static void comandoWifi(const String& cmd) {
   if (!ssid.length()) { Serial.println("@WIFI:ERRO ssid vazio"); return; }
   if (!A7672Firebase::wifiSalvar(ssid, pass)) { Serial.println("@WIFI:ERRO nvs"); return; }
 
-  logf("Wi-Fi: rede trocada pelo app para \"%s\".", ssid.c_str());
-  WiFi.disconnect();
-  conectarWifi();
-  Serial.println(WiFi.status() == WL_CONNECTED
-                 ? "@WIFI:OK " + WiFi.localIP().toString()
-                 : "@WIFI:FALHA nao conectou");
+  // Responde já e deixa a conexão para o loop: quem mandou o comando não pode
+  // ficar sem resposta enquanto o rádio associa.
+  Serial.println("@WIFI:SALVO " + ssid);
+  logf("Wi-Fi: rede trocada pelo app para \"%s\" — conectando em segundo plano.", ssid.c_str());
+  wifiReconectar = true;
 }
 
 static void pumpUsb() {
@@ -224,7 +234,8 @@ static bool ponteSolicitada() {
   return ponteAtiva;
 }
 
-// Conecta usando o que o app mandou (NVS) ou, na falta, o secrets.h.
+// Dispara a associação e volta na hora. Quem acompanha o resultado é o loop,
+// em wifiPump() — esperar aqui congelaria display, serial e NMEA.
 static void conectarWifi() {
   String ssid, pass;
   bool doApp = A7672Firebase::wifiSalvo(ssid, pass);
@@ -232,7 +243,7 @@ static void conectarWifi() {
 
   if (!ssid.length()) {
     logf("Wi-Fi: nenhuma rede configurada — mapa so do cache.");
-    logf("       Configure pela aba Firebase do app, em 'Wi-Fi do ESP32'.");
+    logf("       Configure na aba ESP32 do app, em 'Wi-Fi do ESP32'.");
     return;
   }
 
@@ -240,11 +251,40 @@ static void conectarWifi() {
        ssid.c_str(), doApp ? "definida pelo app" : "do secrets.h");
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid.c_str(), pass.c_str());
-  uint32_t ate = millis() + 10000;
-  while (WiFi.status() != WL_CONNECTED && millis() < ate) delay(200);
+}
 
-  if (WiFi.status() == WL_CONNECTED) logf("Wi-Fi: %s", WiFi.localIP().toString().c_str());
-  else                               logf("Wi-Fi: nao conectou — mapa so do cache.");
+// Acompanha a associação sem bloquear e avisa uma única vez quando o estado
+// muda. Sem isto não haveria como saber se a rede nova pegou.
+static void wifiPump() {
+  static wl_status_t anterior = WL_IDLE_STATUS;
+  static uint32_t desde = 0;
+
+  if (wifiReconectar) {
+    wifiReconectar = false;
+    WiFi.disconnect();
+    conectarWifi();
+    desde = millis();
+    anterior = WL_IDLE_STATUS;
+    return;
+  }
+
+  wl_status_t agora = WiFi.status();
+  if (agora == anterior) {
+    // Sem associar em 20 s costuma ser senha errada ou rede fora de alcance.
+    if (agora != WL_CONNECTED && desde && millis() - desde > 20000) {
+      desde = 0;
+      logf("Wi-Fi: nao conectou (senha errada ou rede fora de alcance?) — mapa so do cache.");
+      Serial.println("@WIFI:FALHA nao conectou");
+    }
+    return;
+  }
+
+  anterior = agora;
+  if (agora == WL_CONNECTED) {
+    desde = 0;
+    logf("Wi-Fi: conectado — %s", WiFi.localIP().toString().c_str());
+    Serial.println("@WIFI:OK " + WiFi.localIP().toString());
+  }
 }
 
 static void printFix(const GnssFix& f) {
@@ -416,12 +456,23 @@ void setup() {
 
 void loop() {
   pumpUsb();
+  wifiPump();
 
   // Em modo ponte o firmware sai de cena: repassa os bytes crus e não toca em
   // nada. Deixar o pump() rodar aqui comeria as respostas antes de chegarem ao
   // PC, e o envio periódico disputaria a UART com quem está do outro lado.
   if (ponteAtiva) {
     while (Serial2.available()) Serial.write((char)Serial2.read());
+
+    // Um sinal de vida piscando devagar: sem isto a tela de ponte fica
+    // estática e o aparelho continua parecendo travado.
+    static uint32_t pisca = 0;
+    static bool aceso = false;
+    if (millis() - pisca > 1200) {
+      pisca = millis();
+      aceso = !aceso;
+      tft.fillCircle(462, 302, 5, aceso ? 0x3D7F : 0x0861);
+    }
     return;
   }
 
@@ -517,13 +568,15 @@ void loop() {
     ui.atualizar(e);
   }
 
-  // Enche o cache de tiles enquanto houver Wi-Fi. Poucos por vez: cada
-  // download segura o loop, e o rastreamento não pode ficar esperando mapa.
+  // Enche o cache de tiles enquanto houver Wi-Fi. UM por vez: cada download é
+  // uma requisição HTTPS que segura o loop por 1 a 3 s, e nesse tempo o
+  // display não atualiza e o NMEA se acumula. Encher o cache é o trabalho
+  // menos urgente que este firmware tem.
   static uint32_t lastTile = 0;
   if (WiFi.status() == WL_CONNECTED && gnss.fix().valid
-      && millis() - lastTile > 3000) {
+      && millis() - lastTile > 5000) {
     lastTile = millis();
     const GnssFix& f = gnss.fix();
-    if (mapa.precarregar(f.lat, f.lon, MAPA_ZOOM, 1, 2) > 0) ui.marcarMapaSujo();
+    if (mapa.precarregar(f.lat, f.lon, MAPA_ZOOM, 1, 1) > 0) ui.marcarMapaSujo();
   }
 }
