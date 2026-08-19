@@ -140,6 +140,53 @@ static void entrarPonte(bool on) {
   Serial.println(on ? "@BRIDGE:ON" : "@BRIDGE:OFF");
 }
 
+static void conectarWifi();
+
+// Configuração de Wi-Fi pelo cabo, não pelo banco. A senha de uma rede não
+// tem por que subir para a nuvem — ainda mais neste projeto, cuja Web API Key
+// é pública por estar no app. Aqui ela vai do navegador direto para a NVS.
+//
+//   @WIFI?                          -> responde a rede atual (sem a senha)
+//   @WIFI {"ssid":"casa","pass":"1234"}  -> grava e reconecta
+//   @WIFI!                          -> apaga a rede salva
+//
+// O corpo vem em JSON para aguentar senha com espaço, ':' ou acento, que um
+// separador simples quebraria.
+static void comandoWifi(const String& cmd) {
+  String ssid, pass;
+
+  if (cmd == "@WIFI?" || cmd == "@WIFI") {
+    A7672Firebase::wifiSalvo(ssid, pass);
+    Serial.println("@WIFI:" + String(ssid.length() ? "SSID " : "VAZIO ") + ssid
+                   + (WiFi.status() == WL_CONNECTED ? " CONECTADO " + WiFi.localIP().toString() : " DESCONECTADO"));
+    return;
+  }
+
+  if (cmd == "@WIFI!") {
+    A7672Firebase::wifiApagar();
+    WiFi.disconnect(true);
+    Serial.println("@WIFI:APAGADO");
+    logf("Wi-Fi: rede salva apagada pelo app.");
+    return;
+  }
+
+  int chave = cmd.indexOf('{');
+  if (chave < 0) { Serial.println("@WIFI:ERRO formato"); return; }
+  String json = cmd.substring(chave);
+  ssid = A7672Firebase::jsonString(json, "ssid");
+  pass = A7672Firebase::jsonString(json, "pass");
+
+  if (!ssid.length()) { Serial.println("@WIFI:ERRO ssid vazio"); return; }
+  if (!A7672Firebase::wifiSalvar(ssid, pass)) { Serial.println("@WIFI:ERRO nvs"); return; }
+
+  logf("Wi-Fi: rede trocada pelo app para \"%s\".", ssid.c_str());
+  WiFi.disconnect();
+  conectarWifi();
+  Serial.println(WiFi.status() == WL_CONNECTED
+                 ? "@WIFI:OK " + WiFi.localIP().toString()
+                 : "@WIFI:FALHA nao conectou");
+}
+
 static void pumpUsb() {
   while (Serial.available()) {
     char c = (char)Serial.read();
@@ -152,6 +199,7 @@ static void pumpUsb() {
       if (cmd == "@BRIDGE")      { entrarPonte(true);  continue; }
       if (cmd == "@NORMAL")      { entrarPonte(false); continue; }
       if (cmd == "@PING")        { Serial.println(ponteAtiva ? "@BRIDGE:ON" : "@BRIDGE:OFF"); continue; }
+      if (cmd.startsWith("@WIFI")) { comandoWifi(cmd); continue; }
       if (ponteAtiva && cmd.length()) modem.write(cmd + "\r\n");
       continue;
     }
@@ -362,6 +410,8 @@ void setup() {
        firebase.enabled() ? "ATIVO" : "PARADO (aguardando comando do app)");
   logf("Ponte: mande '@BRIDGE' por esta serial para falar AT com o modulo "
        "atraves do ESP32, e '@NORMAL' para devolver o controle ao firmware.");
+  logf("Wi-Fi: '@WIFI?' mostra a rede, '@WIFI {\"ssid\":\"..\",\"pass\":\"..\"}' troca, "
+       "'@WIFI!' apaga. A senha nunca passa pelo Firebase.");
 }
 
 void loop() {
@@ -400,14 +450,6 @@ void loop() {
                                                     : "Envio desativado pelo app");
     }
 
-    // Rede do mapa trocada pelo app: reconecta na hora, sem esperar reboot.
-    String ssid, pass;
-    if (firebase.fetchWifi(ssid, pass)) {
-      logf("COMANDO do app: rede Wi-Fi trocada para \"%s\".", ssid.c_str());
-      firebase.remoteLog("info", "Wi-Fi trocado para " + ssid);
-      WiFi.disconnect();
-      conectarWifi();
-    }
   }
 
   // ── Envio periódico ─────────────────────────────────────────

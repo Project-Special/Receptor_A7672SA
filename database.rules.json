@@ -51,13 +51,8 @@
           }
         },
 
-        "wifi": {
-          "//": "Senha da rede do mapa. Qualquer um autenticado ESCREVE (é o app mandando a rede nova), mas só o próprio device LÊ. Por isso o .read não pode estar no nível $device: no Realtime Database a permissão do pai cascateia e não há como restringi-la num filho. Troque o uid ao trocar de placa — ele aparece em /devices/<id>/status/uid.",
-          ".read": "auth != null && auth.uid === 'aSTJrpfkHAVXu5B6XrlQWFJQFlo2'",
-          "ssid": { ".validate": "newData.isString() && newData.val().length <= 64" },
-          "pass": { ".validate": "newData.isString() && newData.val().length <= 64" },
-          "$outro": { ".validate": false }
-        }
+        "//": "Não existe nó 'wifi' aqui de propósito. A senha da rede vai do app para o device pelo cabo USB (comando @WIFI na serial) e fica só na NVS. Guardá-la no banco a exporia a quem tivesse a Web API Key — que é pública, por ir no app.",
+        "wifi": { ".validate": false }
       }
     }
   }

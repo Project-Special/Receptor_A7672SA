@@ -64,11 +64,13 @@ public:
   // `level`: "info", "warn" ou "erro".
   bool remoteLog(const String& level, const String& message);
 
-  // Lê /devices/<id>/wifi e guarda na NVS. Devolve true quando as credenciais
-  // mudaram — aí vale reconectar. O cache local existe para o Wi-Fi não
-  // depender de já haver internet: no boot as credenciais saem da NVS.
-  bool fetchWifi(String& ssid, String& pass);
+  // Credenciais de Wi-Fi guardadas na NVS. Elas NÃO passam pelo banco: são
+  // gravadas pelo comando '@WIFI' na serial, com o app ligado no cabo. A senha
+  // de uma rede não tem por que subir para a nuvem, ainda mais num projeto
+  // cuja Web API Key é pública.
   static bool wifiSalvo(String& ssid, String& pass);
+  static bool wifiSalvar(const String& ssid, const String& pass);
+  static void wifiApagar();
 
   // UID do usuário anônimo. Estável entre reinícios (o refreshToken fica na
   // NVS) e é o que permite restringir a leitura da senha do Wi-Fi só a este
@@ -90,6 +92,10 @@ public:
   // receptor ainda não entregou a data.
   static String dayKey(const String& iso);
 
+  // Extrator de "chave":"valor". Público porque o parser do comando @WIFI, no
+  // main, usa o mesmo formato.
+  static String jsonString(const String& src, const String& key);
+
 private:
   bool put(const String& path, const String& json, const String& method);
   bool fetch(const String& path, String& out);
@@ -97,7 +103,6 @@ private:
   bool signUpAnonymous();
   bool refreshIdToken();
   void storeTokens(const String& idToken, const String& refreshToken, long expiresIn);
-  static String jsonString(const String& src, const String& key);
 
   A7672Tls& _t;
   String _apiKey, _dbHost, _deviceId;

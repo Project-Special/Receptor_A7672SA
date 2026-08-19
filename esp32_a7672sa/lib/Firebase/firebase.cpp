@@ -228,29 +228,21 @@ bool A7672Firebase::wifiSalvo(String& ssid, String& pass) {
   return ssid.length() > 0;
 }
 
-bool A7672Firebase::fetchWifi(String& ssid, String& pass) {
-  String body;
-  if (!fetch("/devices/" + _deviceId + "/wifi.json", body)) return false;
-  if (body.length() == 0 || body == "null") return false;
-
-  String s = jsonString(body, "ssid");
-  String p = jsonString(body, "pass");
-  if (s.isEmpty()) return false;
-
-  String sAtual, pAtual;
-  wifiSalvo(sAtual, pAtual);
-  if (s == sAtual && p == pAtual) { ssid = s; pass = p; return false; }
-
-  // Guarda localmente: no próximo boot o Wi-Fi sobe sem depender de já haver
-  // internet para ler o banco.
-  Preferences prefs;
-  if (prefs.begin(kNvsSpace, false)) {
-    prefs.putString(kNvsSsid, s);
-    prefs.putString(kNvsPass, p);
-    prefs.end();
-  }
-  ssid = s; pass = p;
+bool A7672Firebase::wifiSalvar(const String& ssid, const String& pass) {
+  Preferences p;
+  if (!p.begin(kNvsSpace, false)) return false;
+  p.putString(kNvsSsid, ssid);
+  p.putString(kNvsPass, pass);
+  p.end();
   return true;
+}
+
+void A7672Firebase::wifiApagar() {
+  Preferences p;
+  if (!p.begin(kNvsSpace, false)) return;
+  p.remove(kNvsSsid);
+  p.remove(kNvsPass);
+  p.end();
 }
 
 bool A7672Firebase::remoteLog(const String& level, const String& message) {
