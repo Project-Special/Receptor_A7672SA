@@ -513,16 +513,32 @@
     .esp-hint  { font-weight: 400; font-size: 11px; color: var(--text-dim); }
     .esp-nota  { font-size: 11px; color: var(--text-dim); margin-top: 8px; line-height: 1.5; }
 
-    /* Lista da varredura de redes */
-    .esp-redes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-    .esp-rede  { display: flex; align-items: center; gap: 8px; cursor: pointer;
-                 border: 1px solid var(--border); border-radius: 8px;
-                 padding: 7px 11px; font-size: 12px; color: var(--text);
-                 background: rgba(255,255,255,0.02); min-height: 38px; }
-    .esp-rede:hover      { border-color: var(--accent); background: rgba(88,166,255,0.08); }
-    .esp-rede.atual      { border-color: #2f6c55; background: #10251c; }
-    .esp-rede .rssi      { color: var(--text-dim); font-variant-numeric: tabular-nums; }
-    .esp-rede .cadeado   { opacity: 0.75; }
+    /* Lista da varredura de redes. Uma linha por rede, com marcador de
+       seleção à esquerda: em cartões lado a lado não ficava claro que dava
+       para clicar, nem qual estava escolhida. */
+    .esp-redes-t { font-size: 12px; color: var(--text-dim); margin: 12px 0 6px; }
+    .esp-redes   { display: flex; flex-direction: column; gap: 4px;
+                   max-height: 210px; overflow-y: auto; }
+    .esp-rede    { display: flex; align-items: center; gap: 10px; cursor: pointer;
+                   border: 1px solid var(--border); border-radius: 8px;
+                   padding: 9px 12px; font-size: 13px; color: var(--text);
+                   background: rgba(255,255,255,0.02); min-height: 44px; }
+    .esp-rede:hover  { border-color: var(--accent); background: rgba(88,166,255,0.08); }
+    .esp-rede.atual  { border-color: var(--green, #3fb950); background: #10251c; }
+
+    /* Marcador redondo, como um radio: diz "escolha uma". */
+    .esp-rede .mark  { width: 16px; height: 16px; flex-shrink: 0; border-radius: 50%;
+                       border: 2px solid var(--border); position: relative; }
+    .esp-rede.atual .mark { border-color: var(--green, #3fb950); }
+    .esp-rede.atual .mark::after { content: ''; position: absolute; inset: 3px;
+                       border-radius: 50%; background: var(--green, #3fb950); }
+
+    .esp-rede .nome    { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .esp-rede .rssi    { color: var(--text-dim); font-variant-numeric: tabular-nums;
+                         font-size: 12px; white-space: nowrap; }
+    .esp-rede .cadeado { opacity: 0.75; }
+    .esp-rede .usada   { font-size: 10px; color: var(--green, #3fb950);
+                         border: 1px solid #2f6c55; border-radius: 4px; padding: 1px 5px; }
     @media (max-width: 768px) {
       .esp-sec { padding: 10px; }
       .esp-head { flex-direction: column; align-items: flex-start; gap: 6px; }
@@ -4908,10 +4924,15 @@ async function espWifiMudar() {
 
   const r = await resp;
   if (!r) { fbrLog('ESP32 nao respondeu ao @WIFI.', 'err'); return; }
+  if (r.includes('SALVO') || r.includes('OK')) espWifiEmUso = ssid;
   if (r.includes('OK'))        fbrLog(`Wi-Fi trocado para "${ssid}" — ${r.replace('@WIFI:OK', 'IP')}`, 'ok');
   else if (r.includes('FALHA')) fbrLog(`Rede "${ssid}" gravada, mas nao conectou. Confira a senha.`, 'warn');
   else                          fbrLog(`ESP32: ${r}`, 'err');
 }
+
+// Rede que o ESP32 está usando agora, para marcá-la na lista. Preenchida
+// pelo @WIFI? e pela resposta do @WIFI.
+let espWifiEmUso = '';
 
 // Varre as redes pelo próprio ESP32 — é o rádio dele que importa, não o do
 // PC: a rede que aparece forte aqui pode não alcançar onde o aparelho fica.
@@ -4950,26 +4971,42 @@ async function espWifiScan() {
   const lista = redes.filter(r => r.ssid && !vistos.has(r.ssid) && vistos.add(r.ssid));
 
   const atual = (document.getElementById('fbWifiSsid').value || '').trim();
+  const emUso = espWifiEmUso;   // a que o ESP32 está usando agora, se souber
   const dl = document.getElementById('fbWifiRedes');
   dl.innerHTML = lista.map(r => `<option value="${r.ssid.replace(/"/g, '&quot;')}"></option>`).join('');
+
+  const titulo = document.createElement('div');
+  titulo.className = 'esp-redes-t';
+  titulo.textContent = `Selecione a rede que o ESP32 vai usar (${lista.length} encontradas):`;
+  caixa.appendChild(titulo);
+
+  const linhas = document.createElement('div');
+  linhas.className = 'esp-redes';
+  caixa.appendChild(linhas);
 
   for (const r of lista) {
     const el = document.createElement('div');
     el.className = 'esp-rede' + (r.ssid === atual ? ' atual' : '');
     el.title = `${r.rssi} dBm${r.aberta ? ' · rede aberta' : ''}`;
     const barras = r.rssi >= -55 ? '▂▄▆█' : r.rssi >= -67 ? '▂▄▆' : r.rssi >= -78 ? '▂▄' : '▂';
-    el.innerHTML = `<span class="cadeado">${r.aberta ? '🔓' : '🔒'}</span>`
-                 + `<span>${r.ssid.replace(/</g, '&lt;')}</span>`
-                 + `<span class="rssi">${barras} ${r.rssi}</span>`;
+    el.innerHTML = `<span class="mark"></span>`
+                 + `<span class="cadeado">${r.aberta ? '🔓' : '🔒'}</span>`
+                 + `<span class="nome">${r.ssid.replace(/</g, '&lt;')}</span>`
+                 + (r.ssid === emUso ? `<span class="usada">em uso</span>` : '')
+                 + `<span class="rssi">${barras} ${r.rssi} dBm</span>`;
     el.onclick = () => {
       document.getElementById('fbWifiSsid').value = r.ssid;
-      document.querySelectorAll('#espRedes .esp-rede').forEach(x => x.classList.remove('atual'));
+      linhas.querySelectorAll('.esp-rede').forEach(x => x.classList.remove('atual'));
       el.classList.add('atual');
-      document.getElementById('fbWifiPass').focus();
+      // Rede aberta não tem senha: mandar direto para o botão poupa o passo.
+      document.getElementById('fbWifiPass').value = '';
+      document.getElementById(r.aberta ? 'fbWifiSsid' : 'fbWifiPass').focus();
+      fbrLog(`Rede "${r.ssid}" selecionada${r.aberta ? ' (aberta)' : ''}. `
+           + 'Preencha a senha e use "Mudar Wi-Fi".', 'ok');
     };
-    caixa.appendChild(el);
+    linhas.appendChild(el);
   }
-  fbrLog(`${lista.length} rede(s) encontrada(s) pelo ESP32. Clique numa para preencher.`, 'ok');
+  fbrLog(`${lista.length} rede(s) encontrada(s) pelo ESP32.`, 'ok');
 }
 
 async function espWifiConsultar() {
@@ -4977,7 +5014,22 @@ async function espWifiConsultar() {
   const resp = waitFor(l => l.startsWith('@WIFI:'), 6000);
   await writeRaw('@WIFI?\r\n');
   const r = await resp;
-  fbrLog(r ? `Rede no ESP32: ${r.replace('@WIFI:', '')}` : 'ESP32 nao respondeu.', r ? 'ok' : 'err');
+  if (!r) { fbrLog('ESP32 nao respondeu.', 'err'); return; }
+
+  // '@WIFI:SSID <nome> CONECTADO <ip>' — guarda o nome para marcar na lista.
+  const m = r.match(/@WIFI:SSID\s+(.*?)\s+(?:CONECTADO|DESCONECTADO)/);
+  if (m) {
+    espWifiEmUso = m[1];
+    document.querySelectorAll('#espRedes .esp-rede').forEach(el => {
+      const nome = el.querySelector('.nome')?.textContent;
+      if (nome === espWifiEmUso && !el.querySelector('.usada')) {
+        const tag = document.createElement('span');
+        tag.className = 'usada'; tag.textContent = 'em uso';
+        el.insertBefore(tag, el.querySelector('.rssi'));
+      }
+    });
+  }
+  fbrLog(`Rede no ESP32: ${r.replace('@WIFI:', '')}`, 'ok');
 }
 
 async function espWifiApagar() {
