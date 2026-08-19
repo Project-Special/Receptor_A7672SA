@@ -45,9 +45,12 @@ private:
   static bool parse(const String& raw, TlsResponse& out, size_t maxBody);
   static String dechunk(const String& in);
 
+  bool dataReadyCached();
+
   A7672Core& _c;
   A7672Net&  _n;
   bool     _started = false;
   uint32_t _timeout = 30000;
   size_t   _maxBody = 4096;
+  uint32_t _dataOkAt = 0;      // millis() da última confirmação de PDP ativo
 };

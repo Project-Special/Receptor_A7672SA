@@ -152,6 +152,93 @@ bool A7672Firebase::put(const String& path, const String& json, const String& me
   return true;
 }
 
+// Valor cru de uma chave: serve para números e booleanos, que jsonString() não
+// pega por procurar aspas. Devolve "" quando a chave não existe.
+String A7672Firebase::jsonRaw(const String& src, const String& key) {
+  String needle = "\"" + key + "\"";
+  int k = src.indexOf(needle);
+  if (k < 0) return "";
+  int colon = src.indexOf(':', k + needle.length());
+  if (colon < 0) return "";
+
+  int i = colon + 1;
+  while (i < (int)src.length() && (src[i] == ' ' || src[i] == '"')) i++;
+  int start = i;
+  while (i < (int)src.length() && src[i] != ',' && src[i] != '}' && src[i] != '"') i++;
+
+  String v = src.substring(start, i);
+  v.trim();
+  return v;
+}
+
+bool A7672Firebase::fetch(const String& path, String& out) {
+  if (!ensureAuth()) return false;
+
+  String url = path + (path.indexOf('?') >= 0 ? "&" : "?") + "auth=" + _idToken;
+  TlsResponse r = _t.request("GET", _dbHost, url);
+  if (!r.ok) {
+    _lastError = "GET " + path + " -> HTTP " + String(r.status) + " " + r.body.substring(0, 120);
+    if (r.status == 401) _idToken = "";
+    return false;
+  }
+  out = r.body;
+  return true;
+}
+
+bool A7672Firebase::fetchConfig() {
+  String body;
+  if (!fetch("/devices/" + _deviceId + "/config.json", body)) return false;
+
+  // Nó ausente vem como "null": é o estado inicial, antes de o app mandar
+  // qualquer ordem. Aí o rastreamento fica desligado, que é o padrão seguro.
+  if (body.length() == 0 || body == "null") {
+    _enabled = false;
+    return true;
+  }
+
+  String en = jsonRaw(body, "enabled");
+  if (en.length()) _enabled = (en == "true" || en == "1");
+
+  String iv = jsonRaw(body, "interval");
+  if (iv.length()) _remoteInterval = (uint32_t)iv.toInt();
+
+  return true;
+}
+
+bool A7672Firebase::remoteLog(const String& level, const String& message) {
+  // Escapa o que quebraria o JSON. As mensagens vêm do próprio firmware, mas
+  // muitas carregam resposta do módulo, com aspas e barras dentro.
+  String safe;
+  safe.reserve(message.length() + 16);
+  for (size_t i = 0; i < message.length(); i++) {
+    char c = message[i];
+    if (c == '"' || c == '\\') { safe += '\\'; safe += c; }
+    else if (c == '\n' || c == '\r') safe += ' ';
+    else if ((uint8_t)c < 0x20) continue;
+    else safe += c;
+  }
+  if (safe.length() > 180) safe = safe.substring(0, 180);
+
+  String json = "{\"lvl\":\"" + level + "\",\"msg\":\"" + safe +
+                "\",\"up\":" + String(millis() / 1000) + "}";
+  return put("/devices/" + _deviceId + "/logs.json", json, "POST");
+}
+
+bool A7672Firebase::sendStatus(const String& utc, bool hasFix, int sats, int rssi,
+                               uint32_t sent, uint32_t failed) {
+  String json = "{";
+  json += "\"enabled\":" + String(_enabled ? "true" : "false");
+  json += ",\"fix\":"    + String(hasFix ? "true" : "false");
+  json += ",\"sats\":"   + String(sats);
+  json += ",\"rssi\":"   + String(rssi);
+  json += ",\"sent\":"   + String(sent);
+  json += ",\"failed\":" + String(failed);
+  json += ",\"up\":"     + String(millis() / 1000);
+  if (utc.length()) json += ",\"seen\":\"" + utc + "\"";
+  json += "}";
+  return put("/devices/" + _deviceId + "/status.json", json, "PUT");
+}
+
 // "2026-08-18T13:45:02Z" -> "2026-08-18". Sem data do satélite os pontos vão
 // para um nó à parte em vez de se perderem ou contaminarem um dia real: isso
 // acontece nos primeiros quadros NMEA, quando já há posição mas ainda não veio

@@ -493,9 +493,9 @@
     .pill.on  { color: var(--green); border-color: #3fb95055; background: #16281a; }
     .pill.off { color: var(--text-dim); }
     .pill.err { color: var(--red); border-color: #f8514955; background: #2b1517; }
-    #fb-log .ok   { color: var(--green); }
-    #fb-log .err  { color: var(--red); }
-    #fb-log .warn { color: #d29922; }
+    #fb-log .ok,   #fbr-log .ok   { color: var(--green); }
+    #fb-log .err,  #fbr-log .err  { color: var(--red); }
+    #fb-log .warn, #fbr-log .warn { color: #d29922; }
 
     .hint { font-size: 11px; color: var(--text-dim); line-height: 1.6; }
     .hint code { font-family: var(--mono); color: var(--cyan); }
@@ -1665,9 +1665,50 @@
             <div class="info-card"><div class="card-label">Nó do dia</div><div class="card-value" id="fb-day" style="font-size:15px;">--</div></div>
           </div>
 
+          <div class="form-group" style="min-height:0;">
+            <label>Log do Firebase (deste navegador)</label>
+            <div class="console-box" id="fb-log" style="min-height:90px;">Preencha host e API key, depois use "Testar conexão".</div>
+          </div>
+
+          <!-- ── Controle remoto do ESP32 ─────────────────────────
+               O device roda longe daqui: o unico canal entre os dois e o
+               proprio banco. O app escreve a ordem em /config e le o que o
+               device reporta em /status e /logs. -->
+          <h3 style="margin-top:6px;">Rastreador ESP32 — controle remoto</h3>
+
+          <div class="form-row">
+            <div class="form-group" style="max-width:220px;">
+              <label>Device do ESP32</label>
+              <input id="fbRemoteDevice" type="text" value="esp32-01" />
+            </div>
+            <div class="form-group" style="max-width:170px;">
+              <label>Intervalo do ESP32 (s)</label>
+              <input id="fbRemoteInterval" type="number" min="5" max="3600" value="30" />
+            </div>
+          </div>
+
+          <div class="btn-row">
+            <button class="action-btn" id="fbRemoteOnBtn" onclick="fbRemoteEnable(true)">▶️ Ativar envio</button>
+            <button class="action-btn secondary" onclick="fbRemoteEnable(false)">⏹️ Desativar envio</button>
+            <button class="action-btn secondary" onclick="fbRemoteRefresh()">🔄 Atualizar status</button>
+            <button class="action-btn secondary" id="fbRemoteAutoBtn" onclick="fbRemoteAutoToggle()">👁️ Monitorar</button>
+            <button class="action-btn secondary" onclick="fbRemoteClearLogs()">🗑️ Limpar logs</button>
+          </div>
+
+          <div class="info-grid">
+            <div class="info-card"><div class="card-label">Device</div><div class="card-value" id="fbr-state" style="font-size:15px;">--</div></div>
+            <div class="info-card"><div class="card-label">Envio</div><div class="card-value" id="fbr-enabled" style="font-size:15px;">--</div></div>
+            <div class="info-card"><div class="card-label">GNSS</div><div class="card-value" id="fbr-fix" style="font-size:15px;">--</div></div>
+            <div class="info-card"><div class="card-label">Sinal</div><div class="card-value" id="fbr-rssi" style="font-size:15px;">--</div></div>
+            <div class="info-card"><div class="card-label">Enviados</div><div class="card-value" id="fbr-sent" style="font-size:15px;">--</div></div>
+            <div class="info-card"><div class="card-label">Falhas</div><div class="card-value" id="fbr-failed" style="font-size:15px;">--</div></div>
+            <div class="info-card"><div class="card-label">Visto por último</div><div class="card-value" id="fbr-seen" style="font-size:15px;">--</div></div>
+            <div class="info-card"><div class="card-label">Ligado há</div><div class="card-value" id="fbr-up" style="font-size:15px;">--</div></div>
+          </div>
+
           <div class="form-group" style="flex:1;min-height:0;">
-            <label>Log do Firebase</label>
-            <div class="console-box" id="fb-log">Preencha host e API key, depois use "Testar conexão".</div>
+            <label>Logs do ESP32 (vindos do banco)</label>
+            <div class="console-box" id="fbr-log">Informe o device e use "Atualizar status".</div>
           </div>
         </div>
       </div>
@@ -4618,6 +4659,133 @@ function firebaseIntervalChanged() {
   document.getElementById('fbInterval').value = c.interval;
   firebaseSaveCfg();
   if (fbTimer) fbLog(`Intervalo agora é ${c.interval}s.`, 'ok');
+}
+
+// ── Controle remoto do ESP32 via Firebase ─────────────────────
+// O device nao fala com o navegador: o banco e o unico canal. O app escreve a
+// ordem em /config, o device le no proximo ciclo e responde em /status e /logs.
+let fbrTimer = null;
+
+function fbRemoteDevice() {
+  return (document.getElementById('fbRemoteDevice').value || 'esp32-01').trim();
+}
+
+function fbrLog(msg, cls = '') {
+  const box = document.getElementById('fbr-log');
+  if (!box) return;
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  box.appendChild(line);
+  while (box.children.length > 300) box.removeChild(box.firstChild);
+  box.scrollTop = box.scrollHeight;
+}
+
+async function fbRemoteEnable(on) {
+  const c = firebaseCfg();
+  if (!c.host || !c.key) { alert('Preencha o host do banco e a Web API Key.'); return; }
+  const dev = fbRemoteDevice();
+  const intervalo = Math.min(3600, Math.max(5,
+    parseInt(document.getElementById('fbRemoteInterval').value, 10) || 30));
+
+  try {
+    await fbWrite(`/devices/${encodeURIComponent(dev)}/config.json`,
+                  { enabled: !!on, interval: intervalo }, 'PUT');
+    fbLog(`Comando enviado: ${dev} -> envio ${on ? 'ATIVADO' : 'DESATIVADO'} (${intervalo}s).`, 'ok');
+    // O device so obedece no proximo poll dele; dizer isso evita a leitura de
+    // que o comando falhou quando o status ainda mostra o valor antigo.
+    fbrLog(`>> comando: envio ${on ? 'ATIVADO' : 'DESATIVADO'} — o ESP32 aplica no proximo ciclo (ate ~30 s)`, 'warn');
+    setTimeout(fbRemoteRefresh, 1500);
+  } catch (e) {
+    fbLog(`Falha ao enviar comando: ${e.message}`, 'err');
+  }
+}
+
+function fbrAge(iso) {
+  if (!iso) return '--';
+  const t = Date.parse(iso);
+  if (isNaN(t)) return iso;
+  const s = Math.floor((Date.now() - t) / 1000);
+  if (s < 90) return `há ${s}s`;
+  if (s < 5400) return `há ${Math.floor(s / 60)} min`;
+  return `há ${Math.floor(s / 3600)} h`;
+}
+
+function fbrUptime(seg) {
+  if (seg === undefined || seg === null) return '--';
+  const h = Math.floor(seg / 3600), m = Math.floor((seg % 3600) / 60);
+  return h ? `${h} h ${m} min` : `${m} min ${seg % 60}s`;
+}
+
+async function fbRemoteRefresh() {
+  const c = firebaseCfg();
+  if (!c.host || !c.key) { alert('Preencha o host do banco e a Web API Key.'); return; }
+  const dev = fbRemoteDevice();
+
+  try {
+    const st = await fbGet(`/devices/${encodeURIComponent(dev)}/status.json`);
+    if (!st) {
+      setText('fbr-state', 'sem status');
+      fbrLog(`(nenhum status em /devices/${dev} — o ESP32 ainda nao reportou)`, 'warn');
+    } else {
+      // O heartbeat sai a cada 60 s; passou muito disso, o device sumiu.
+      const t = Date.parse(st.seen || '');
+      const vivo = !isNaN(t) && (Date.now() - t) < 180000;
+      setText('fbr-state',   vivo ? 'online' : 'sem contato');
+      setText('fbr-enabled', st.enabled ? 'ATIVO' : 'parado');
+      setText('fbr-fix',     st.fix ? `fix, ${st.sats ?? '--'} sat` : 'sem fix');
+      setText('fbr-rssi',    st.rssi !== undefined ? `${st.rssi} dBm` : '--');
+      setText('fbr-sent',    st.sent ?? '--');
+      setText('fbr-failed',  st.failed ?? '--');
+      setText('fbr-seen',    fbrAge(st.seen));
+      setText('fbr-up',      fbrUptime(st.up));
+    }
+
+    // limitToLast exige orderBy; a chave do push ja e cronologica.
+    const logs = await fbGet(`/devices/${encodeURIComponent(dev)}/logs.json?orderBy="$key"&limitToLast=40`);
+    const box = document.getElementById('fbr-log');
+    if (box) box.textContent = '';
+    if (!logs) {
+      fbrLog('(sem logs gravados)');
+    } else {
+      Object.entries(logs).sort((a, b) => a[0].localeCompare(b[0])).forEach(([, l]) => {
+        const cls = l.lvl === 'erro' ? 'err' : l.lvl === 'warn' ? 'warn' : 'ok';
+        fbrLog(`[${fbrUptime(l.up)}] ${(l.lvl || '').toUpperCase()}: ${l.msg}`, cls);
+      });
+    }
+  } catch (e) {
+    setText('fbr-state', 'erro');
+    fbrLog(`falha ao ler: ${e.message}`, 'err');
+  }
+}
+
+function fbRemoteAutoToggle() {
+  const btn = document.getElementById('fbRemoteAutoBtn');
+  if (fbrTimer) {
+    clearInterval(fbrTimer); fbrTimer = null;
+    if (btn) btn.textContent = '👁️ Monitorar';
+    fbrLog('(monitoramento parado)', 'warn');
+  } else {
+    fbrTimer = setInterval(fbRemoteRefresh, 15000);
+    if (btn) btn.textContent = '⏸️ Parar monitor';
+    fbRemoteRefresh();
+  }
+}
+
+async function fbRemoteClearLogs() {
+  const dev = fbRemoteDevice();
+  if (!confirm(`Apagar os logs de /devices/${dev}?`)) return;
+  try {
+    const c = firebaseCfg();
+    const token = await firebaseEnsureAuth();
+    await fetch(`https://${c.host}/devices/${encodeURIComponent(dev)}/logs.json?auth=${token}`,
+                { method: 'DELETE' });
+    const box = document.getElementById('fbr-log');
+    if (box) box.textContent = '';
+    fbrLog('(logs apagados)', 'warn');
+  } catch (e) {
+    fbrLog(`falha ao apagar: ${e.message}`, 'err');
+  }
 }
 
 // ── MQTT ──────────────────────────────────────────────────────

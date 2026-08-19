@@ -9,9 +9,15 @@
 // accounts:signUp de novo e criaria um usuário anônimo novo por hora, enchendo
 // o painel de Authentication de contas órfãs e trocando o UID a cada vez.
 //
-// Caminhos escritos no banco:
-//     /devices/<id>/last                     última posição (sobrescreve)
+// Caminhos no banco:
+//     /devices/<id>/last                      última posição (sobrescreve)
 //     /devices/<id>/track/<AAAA-MM-DD>/<auto> histórico, um nó por dia
+//     /devices/<id>/config                    LIDO: ordens vindas do app
+//     /devices/<id>/status                    escrito: o que o device está fazendo
+//     /devices/<id>/logs/<auto>               escrito: eventos, para o app ler
+//
+// O rastreamento fica DESLIGADO até o app pôr config/enabled = true. Sem isso
+// um device ligado na bancada gastaria dados e escritas sem ninguém pedir.
 #pragma once
 
 #include <tls.h>
@@ -40,6 +46,25 @@ public:
   // Equivale ao seletor "Histórico" da aba Firebase do app.
   void setTrackEnabled(bool on) { _track = on; }
 
+  // Lê /devices/<id>/config e atualiza o estado local. Devolve false quando a
+  // leitura falha — e aí o estado anterior é mantido, para uma falha de rede
+  // não desligar (nem ligar) o rastreamento por conta própria.
+  bool fetchConfig();
+
+  // O device deve estar enviando posições? Vem do config lido do banco.
+  bool enabled() const { return _enabled; }
+
+  // Intervalo pedido pelo app, em segundos. 0 = usar o padrão do firmware.
+  uint32_t remoteInterval() const { return _remoteInterval; }
+
+  // Registra um evento em /devices/<id>/logs para o app mostrar.
+  // `level`: "info", "warn" ou "erro".
+  bool remoteLog(const String& level, const String& message);
+
+  // Atualiza /devices/<id>/status — é o que diz ao app que o device está vivo.
+  bool sendStatus(const String& utc, bool hasFix, int sats, int rssi,
+                  uint32_t sent, uint32_t failed);
+
   bool authenticated() const { return _idToken.length() > 0; }
   const String& lastError() const { return _lastError; }
 
@@ -53,6 +78,8 @@ public:
 
 private:
   bool put(const String& path, const String& json, const String& method);
+  bool fetch(const String& path, String& out);
+  static String jsonRaw(const String& src, const String& key);
   bool signUpAnonymous();
   bool refreshIdToken();
   void storeTokens(const String& idToken, const String& refreshToken, long expiresIn);
@@ -64,4 +91,6 @@ private:
   String _lastError;
   uint32_t _tokenExpiresAt = 0;   // millis() em que o token vence
   bool _track = true;
+  bool _enabled = false;          // só envia depois que o app autorizar
+  uint32_t _remoteInterval = 0;
 };

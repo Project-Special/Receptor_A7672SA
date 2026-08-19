@@ -23,6 +23,25 @@
               "$outro": { ".validate": "newData.isNumber() || newData.isString()" }
             }
           }
+        },
+
+        "config": {
+          "enabled":  { ".validate": "newData.isBoolean()" },
+          "interval": { ".validate": "newData.isNumber() && newData.val() >= 5 && newData.val() <= 3600" },
+          "$outro":   { ".validate": "newData.isNumber() || newData.isString() || newData.isBoolean()" }
+        },
+
+        "status": {
+          "$campo": { ".validate": "newData.isNumber() || newData.isString() || newData.isBoolean()" }
+        },
+
+        "logs": {
+          "$entry": {
+            ".validate": "newData.hasChildren(['lvl','msg'])",
+            "lvl": { ".validate": "newData.isString() && newData.val().length <= 8" },
+            "msg": { ".validate": "newData.isString() && newData.val().length <= 200" },
+            "up":  { ".validate": "newData.isNumber()" }
+          }
         }
       }
     }

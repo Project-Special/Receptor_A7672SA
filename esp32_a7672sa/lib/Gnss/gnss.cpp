@@ -94,9 +94,21 @@ bool A7672Gnss::readFix(GnssFix& out) {
   return true;
 }
 
-bool A7672Gnss::startNmea(int rateHz) {
+bool A7672Gnss::startNmea(int rateHz, bool detalhado) {
   if (!setPortRouting()) return false;
-  _c.at("AT+CGNSSNMEA=1,1,1,1,1,0,0,0");
+
+  // Ordem dos campos: GGA,GLL,GSA,GSV,RMC,VTG,ZDA,GST.
+  //
+  // Medido no stream real, GSV e GLL somam 52% dos ~625 B/s que o receptor
+  // despeja na UART — e essa é a mesma UART por onde passam os comandos AT.
+  // Com ela saturada, respostas de AT+CGATT? e do canal SSL se perdiam no meio
+  // do NMEA e derrubavam envios que teriam funcionado.
+  //
+  // GLL é redundante (RMC já traz posição e hora) e GSV só serve para detalhar
+  // satélites por constelação; a contagem em uso vem do GGA. Ligue `detalhado`
+  // quando essa lista importar mais que a folga na UART.
+  _c.at(detalhado ? "AT+CGNSSNMEA=1,1,1,1,1,0,0,0"
+                  : "AT+CGNSSNMEA=1,0,1,0,1,0,0,0");
   _c.at("AT+CGPSNMEARATE=" + String(rateHz));
   return _c.at("AT+CGNSSTST=1");
 }

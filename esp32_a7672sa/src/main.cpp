@@ -43,6 +43,14 @@ static const uint32_t FB_INTERVAL_MS = 30000;
 // "Histórico" da aba Firebase do app.
 static const bool FB_TRACK = true;
 
+// De quanto em quanto tempo o device pergunta ao banco se deve estar ligado.
+// É o que define a demora entre apertar o botão no app e o device obedecer —
+// e, desligado, é praticamente todo o consumo de dados que sobra.
+static const uint32_t FB_CONFIG_POLL_MS = 30000;
+
+// Heartbeat em /status: é por ele que o app sabe que o device está vivo.
+static const uint32_t FB_STATUS_PUSH_MS = 60000;
+
 // ── Log no monitor (Serial0 / USB) ───────────────────────────
 // true ecoa todo o tráfego AT. Verboso, mas é o que mostra onde a conversa
 // com o módulo trava — deixe ligado até a placa estar validada.
@@ -61,6 +69,19 @@ A7672Tls   tls(modem, net);
 A7672Firebase firebase(tls);
 
 static uint32_t fbEnviados = 0, fbFalhas = 0;
+
+// Último estado da rede. Cada net.refresh() são vários comandos AT disputando
+// a UART com o NMEA a 1 Hz; consultar de dois lugares diferentes fazia as
+// respostas se cruzarem e voltarem vazias ("0 dBm, sem IP"). Um só ponto
+// atualiza, os demais leem daqui.
+static NetStatus netCache;
+static uint32_t netCacheAt = 0;
+
+static void refreshNet(uint32_t maxAgeMs) {
+  if (netCacheAt && millis() - netCacheAt < maxAgeMs) return;
+  net.refresh(netCache);
+  netCacheAt = millis();
+}
 
 // Carimbo de tempo desde o boot: sem ele não dá para saber se duas linhas
 // saíram juntas ou com um minuto de intervalo — e é justamente o intervalo
@@ -95,12 +116,12 @@ static void printStatus() {
       : String("sem fix");
 
   if (modem.sim() == SimState::Ready) {
-    NetStatus st;
-    net.refresh(st);
-    logf("STATUS | rede: %s %s %d dBm IP %s | GNSS: %s | Firebase: %lu env, %lu falhas",
-         st.operatorName.c_str(), st.tech.c_str(), st.dbm,
-         st.ip.length() ? st.ip.c_str() : "sem IP",
-         gnssTxt.c_str(), (unsigned long)fbEnviados, (unsigned long)fbFalhas);
+    refreshNet(45000);   // aproveita a leitura do heartbeat quando é recente
+    logf("STATUS | rede: %s %s %d dBm IP %s | GNSS: %s | envio %s | Firebase: %lu env, %lu falhas",
+         netCache.operatorName.c_str(), netCache.tech.c_str(), netCache.dbm,
+         netCache.ip.length() ? netCache.ip.c_str() : "sem IP",
+         gnssTxt.c_str(), firebase.enabled() ? "ATIVO" : "parado",
+         (unsigned long)fbEnviados, (unsigned long)fbFalhas);
   } else {
     logf("STATUS | SIM: %s | GNSS: %s", A7672Core::simText(modem.sim()), gnssTxt.c_str());
   }
@@ -201,13 +222,24 @@ void setup() {
   logf("Autenticando no Firebase...");
   firebase.begin(FB_API_KEY, FB_DB_HOST, FB_DEVICE);
   firebase.setTrackEnabled(FB_TRACK);
-  if (firebase.ensureAuth())
-    logf("Firebase: autenticado (usuario anonimo). Envios a cada %lu s, com fix valido.",
-         (unsigned long)(FB_INTERVAL_MS / 1000));
-  else
+  if (firebase.ensureAuth()) {
+    logf("Firebase: autenticado (usuario anonimo).");
+
+    // O rastreamento nasce desligado: quem manda ligar é o app, escrevendo em
+    // /devices/<id>/config. Sem isso o device gastaria dados sem ninguem pedir.
+    if (firebase.fetchConfig())
+      logf("Config lido: envio %s.", firebase.enabled() ? "ATIVADO pelo app" : "DESATIVADO");
+    else
+      logf("Config nao lido (%s) — envio segue desativado.", firebase.lastError().c_str());
+
+    firebase.remoteLog("info", String("Boot. Rede ") + st.tech + " " + String(st.dbm) + " dBm, IP " + st.ip);
+  } else {
     logf("Firebase FALHOU: %s", firebase.lastError().c_str());
+  }
 
   logf("=== inicializacao concluida ===");
+  logf("Envio %s. Use o botao 'Ativar envio' na aba Firebase do app para mudar.",
+       firebase.enabled() ? "ATIVO" : "PARADO (aguardando comando do app)");
 }
 
 void loop() {
@@ -220,10 +252,30 @@ void loop() {
     printFix(gnss.fix());
   }
 
-  // Envio periódico para o Firebase. Só sobe com fix válido: mandar 0,0 sujaria
-  // o histórico com pontos no golfo da Guiné.
+  // ── Ordens vindas do app ────────────────────────────────────
+  // Continua consultando mesmo desativado: é assim que o device fica sabendo
+  // que foi religado.
+  static uint32_t lastConfig = 0;
+  if (firebase.authenticated() && millis() - lastConfig > FB_CONFIG_POLL_MS) {
+    lastConfig = millis();
+    bool antes = firebase.enabled();
+    if (!firebase.fetchConfig()) {
+      // Silenciar aqui esconde o motivo de o device ignorar o botão do app.
+      logf("Config: falha ao ler — %s", firebase.lastError().c_str());
+    } else if (firebase.enabled() != antes) {
+      logf("COMANDO do app: envio %s.", firebase.enabled() ? "ATIVADO" : "DESATIVADO");
+      firebase.remoteLog("info", firebase.enabled() ? "Envio ativado pelo app"
+                                                    : "Envio desativado pelo app");
+    }
+  }
+
+  // ── Envio periódico ─────────────────────────────────────────
+  // Só sobe com fix válido: mandar 0,0 sujaria o histórico com pontos no golfo
+  // da Guiné. E só com autorização do app.
+  uint32_t intervalo = firebase.remoteInterval() ? firebase.remoteInterval() * 1000UL
+                                                 : FB_INTERVAL_MS;
   static uint32_t lastSend = 0;
-  if (millis() - lastSend > FB_INTERVAL_MS) {
+  if (firebase.enabled() && millis() - lastSend > intervalo) {
     lastSend = millis();
     const GnssFix& f = gnss.fix();
     if (!f.valid) {
@@ -236,7 +288,19 @@ void loop() {
     } else {
       fbFalhas++;
       logf("Firebase: FALHA (%lu) — %s", (unsigned long)fbFalhas, firebase.lastError().c_str());
+      // Falha vai para o banco: é o que o app tem para diagnosticar de longe.
+      firebase.remoteLog("erro", firebase.lastError());
     }
+  }
+
+  // ── Heartbeat ───────────────────────────────────────────────
+  static uint32_t lastPush = 0;
+  if (firebase.authenticated() && millis() - lastPush > FB_STATUS_PUSH_MS) {
+    lastPush = millis();
+    const GnssFix& f = gnss.fix();
+    refreshNet(30000);
+    firebase.sendStatus(A7672Firebase::isoTimestamp(f.utcDate, f.utcTime),
+                        f.valid, f.svTotal, netCache.dbm, fbEnviados, fbFalhas);
   }
 
   static uint32_t lastStatus = 0;

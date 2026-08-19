@@ -37,6 +37,22 @@ void A7672Tls::end() {
   _started = false;
 }
 
+// Conferir o contexto PDP custa dois comandos AT (CGATT? e CGPADDR) que
+// disputam a UART com o stream NMEA a 1 Hz — e uma resposta perdida ali fazia
+// a checagem dizer "sem rede" para um contexto que estava de pé, derrubando um
+// envio que teria funcionado.
+//
+// O TTL é longo de propósito. A checagem existe só para falhar rápido quando
+// não há rede, e não para vigiar o contexto: se ele cair de fato, o CCHOPEN
+// seguinte falha e zera o cache. Trocar dois comandos AT a cada envio por um a
+// cada dois minutos é o que tira essa consulta do caminho do NMEA.
+bool A7672Tls::dataReadyCached() {
+  if (_dataOkAt && (millis() - _dataOkAt) < 120000) return true;
+  if (!_n.dataReady()) { _dataOkAt = 0; return false; }
+  _dataOkAt = millis();
+  return true;
+}
+
 bool A7672Tls::open(const String& host, uint16_t port) {
   // type 2 = SSL/TLS.
   _c.write("AT+CCHOPEN=" + String(kChannel) + ",\"" + host + "\"," + String(port) + ",2\r\n");
@@ -160,7 +176,7 @@ TlsResponse A7672Tls::request(const String& method, const String& host, const St
   TlsResponse r;
 
   if (!_c.requireSim("Requisicao TLS")) return r;
-  if (!_n.dataReady()) { r.status = -1; return r; }
+  if (!dataReadyCached()) { r.status = -1; return r; }
   if (!begin()) return r;
 
   // O peer fecha sockets ociosos em segundos: abrir e só depois montar o
@@ -178,8 +194,10 @@ TlsResponse A7672Tls::request(const String& method, const String& host, const St
   req += "\r\n";
   req += body;
 
-  if (!open(host, 443)) { close(); return r; }
-  if (!sendAll(req))    { close(); return r; }
+  // Falhar em abrir ou enviar põe o contexto PDP em dúvida: a próxima
+  // requisição confere de novo em vez de confiar no cache.
+  if (!open(host, 443)) { _dataOkAt = 0; close(); return r; }
+  if (!sendAll(req))    { _dataOkAt = 0; close(); return r; }
 
   String raw;
   if (collect(raw)) parse(raw, r, _maxBody);

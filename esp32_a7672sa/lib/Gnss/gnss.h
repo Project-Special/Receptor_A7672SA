@@ -38,7 +38,9 @@ public:
 
   // Stream NMEA na porta AT. Sem o PORTSWITCH as sentenças saem pela porta
   // dedicada e nunca chegam aqui.
-  bool startNmea(int rateHz = 1);
+  // `detalhado` liga também GSV e GLL, que sozinhos dobram o tráfego na UART
+  // e disputam espaço com as respostas dos comandos AT.
+  bool startNmea(int rateHz = 1, bool detalhado = false);
   bool stopNmea();
 
   // Roteamento de saída: 0 = USB, 1 = UART. O padrão 1,1 serve para quem fala
