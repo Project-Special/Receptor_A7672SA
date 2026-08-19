@@ -43,6 +43,14 @@ static const uint32_t FB_INTERVAL_MS = 30000;
 // "Histórico" da aba Firebase do app.
 static const bool FB_TRACK = true;
 
+// ── Log no monitor (Serial0 / USB) ───────────────────────────
+// true ecoa todo o tráfego AT. Verboso, mas é o que mostra onde a conversa
+// com o módulo trava — deixe ligado até a placa estar validada.
+static const bool DEBUG_AT = true;
+
+// Resumo periódico do estado. 0 desliga.
+static const uint32_t STATUS_INTERVAL_MS = 30000;
+
 A7672Core  modem;
 A7672Net   net(modem);
 A7672Sms   sms(modem);
@@ -52,91 +60,152 @@ A7672Http  http(modem, net);
 A7672Tls   tls(modem, net);
 A7672Firebase firebase(tls);
 
+static uint32_t fbEnviados = 0, fbFalhas = 0;
+
+// Carimbo de tempo desde o boot: sem ele não dá para saber se duas linhas
+// saíram juntas ou com um minuto de intervalo — e é justamente o intervalo
+// que denuncia timeout de rede.
+static void logf(const char* fmt, ...) {
+  char buf[256];
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(buf, sizeof(buf), fmt, ap);
+  va_end(ap);
+  uint32_t ms = millis();
+  Serial.printf("[%4lu.%03lu] %s\n", (unsigned long)(ms / 1000), (unsigned long)(ms % 1000), buf);
+}
+
 static void printFix(const GnssFix& f) {
-  if (!f.valid) { Serial.println(F("GNSS: sem fix ainda")); return; }
-  Serial.printf("GNSS: %.6f, %.6f  alt %.0f m  %d sat  HDOP %.2f\n",
-                f.lat, f.lon, f.altitude, f.svTotal, f.hdop);
-  Serial.printf("      GPS %d | GLONASS %d | Galileo %d | BeiDou %d\n",
-                f.svGps, f.svGlonass, f.svGalileo, f.svBeidou);
+  if (!f.valid) {
+    logf("GNSS: sem fix ainda (TTFF a frio leva 30-90 s com vista para o ceu)");
+    return;
+  }
+  logf("GNSS: %.6f, %.6f | fix %dD | alt %.0f m | %d sat | HDOP %.2f | %s %s UTC",
+       f.lat, f.lon, f.mode, f.altitude, f.svTotal, f.hdop,
+       f.utcDate.c_str(), f.utcTime.c_str());
+  logf("      GPS %d | GLONASS %d | Galileo %d | BeiDou %d",
+       f.svGps, f.svGlonass, f.svGalileo, f.svBeidou);
+}
+
+// Uma linha com tudo que importa para saber se o conjunto está de pé.
+static void printStatus() {
+  const GnssFix& f = gnss.fix();
+  String gnssTxt = f.valid
+      ? String("fix ") + f.mode + "D, " + f.svTotal + " sat"
+      : String("sem fix");
+
+  if (modem.sim() == SimState::Ready) {
+    NetStatus st;
+    net.refresh(st);
+    logf("STATUS | rede: %s %s %d dBm IP %s | GNSS: %s | Firebase: %lu env, %lu falhas",
+         st.operatorName.c_str(), st.tech.c_str(), st.dbm,
+         st.ip.length() ? st.ip.c_str() : "sem IP",
+         gnssTxt.c_str(), (unsigned long)fbEnviados, (unsigned long)fbFalhas);
+  } else {
+    logf("STATUS | SIM: %s | GNSS: %s", A7672Core::simText(modem.sim()), gnssTxt.c_str());
+  }
 }
 
 void setup() {
   Serial.begin(115200);
   delay(300);
-  Serial.println(F("\n=== A7672SA / ESP32 ==="));
+  Serial.println();
+  logf("=== A7672SA / ESP32 ===");
+  logf("UART2 @ 115200 8N1 — RX=GPIO%d TX=GPIO%d | PWRKEY=GPIO%d (ativo em %s) | STATUS=%s",
+       PIN_RX, PIN_TX, PIN_PWRKEY, PWRKEY_ACTIVE_HIGH ? "ALTO" : "BAIXO",
+       PIN_STATUS >= 0 ? String(String("GPIO") + PIN_STATUS).c_str() : "nao usado");
+  logf("APN: %s | Firebase: %s (device %s, a cada %lu s)",
+       APN, FB_DB_HOST, FB_DEVICE, (unsigned long)(FB_INTERVAL_MS / 1000));
 
   modem.begin(Serial2, PIN_RX, PIN_TX, 115200);
-  modem.setDebug(&Serial);
+  if (DEBUG_AT) modem.setDebug(&Serial);
 
   modem.setStatusPin(PIN_STATUS);
 
   // Nada de inicializar no escuro: sem o módulo ligado e respondendo, toda a
   // sequência abaixo iria para o vazio e ainda pareceria ter dado certo.
+  logf("Ligando o modulo (pulso no PWRKEY, a UART leva ~8 s para subir)...");
   if (!modem.ensurePowered(PIN_PWRKEY, PWRKEY_ACTIVE_HIGH)) {
-    Serial.println(F("Modulo sem resposta — inicializacao ABORTADA."));
-    Serial.println(F("Verifique: alimentacao 3,4-4,2 V com pico de 2 A, PWRKEY, TX/RX e GND comum."));
+    logf("FALHA: modulo sem resposta — inicializacao ABORTADA.");
+    logf("  Verifique nesta ordem:");
+    logf("  1) alimentacao 3,4-4,2 V aguentando pico de 2 A");
+    logf("  2) PWRKEY: com ligacao direta no modulo, PWRKEY_ACTIVE_HIGH deve ser false");
+    logf("  3) TX/RX cruzados (GPIO%d no TX do modulo, GPIO%d no RX)", PIN_RX, PIN_TX);
+    logf("  4) GND comum entre ESP32 e modulo");
+    logf("  5) STATUS: se o pino nao esta ligado, use PIN_STATUS = -1");
     return;
   }
+  logf("Modulo respondeu ao AT.");
 
   modem.at("ATE0");        // eco atrapalha o parser
   modem.at("AT+CMEE=2");   // erros por extenso
 
   // ── SIM ────────────────────────────────────────────────────
   modem.refreshSim();
-  Serial.printf("SIM: %s\n", A7672Core::simText(modem.sim()));
+  logf("SIM: %s", A7672Core::simText(modem.sim()));
 
   // ── GNSS: independe de SIM, então roda de qualquer jeito ───
   if (gnss.powerOn(3)) {
     gnss.startNmea(1);
-    Serial.println(F("GNSS ligado. TTFF a frio: 30-90 s com vista para o ceu."));
+    logf("GNSS ligado, stream NMEA a 1 Hz.");
   } else {
-    Serial.printf("GNSS indisponivel: %s\n", modem.lastError().c_str());
+    logf("GNSS indisponivel: %s", modem.lastError().c_str());
   }
 
   // Daqui para baixo tudo exige SIM. Os módulos já barram sozinhos, mas sair
   // cedo evita esperar timeouts inúteis.
   if (modem.sim() != SimState::Ready) {
-    Serial.println(F("Sem SIM: rede, SMS, voz e HTTP ficam desabilitados."));
+    logf("Sem SIM: rede, SMS, voz, HTTP e Firebase ficam desabilitados.");
+    logf("O GNSS continua funcionando — os fixes aparecem abaixo, mas nao sobem.");
     return;
   }
 
   // ── Rede ───────────────────────────────────────────────────
+  logf("Registrando na rede (ate 60 s)...");
   net.setApn(APN);
   net.attach();
 
-  if (!net.waitRegistered(60000)) Serial.println(F("Nao registrou na rede."));
+  if (!net.waitRegistered(60000)) logf("AVISO: nao registrou na rede em 60 s.");
 
   NetStatus st;
   net.refresh(st);
-  Serial.printf("Rede: %s | %s | %d dBm | RSRP %d | IP %s\n",
-                st.operatorName.c_str(), st.tech.c_str(), st.dbm, st.rsrp, st.ip.c_str());
+  logf("Rede: %s | %s | %d dBm | RSRP %d | IP %s",
+       st.operatorName.c_str(), st.tech.c_str(), st.dbm, st.rsrp,
+       st.ip.length() ? st.ip.c_str() : "sem IP (contexto PDP nao subiu)");
 
   // ── SMS ────────────────────────────────────────────────────
   sms.begin();
   sms.onArrived([](int index, const String& storage) {
-    Serial.printf("SMS novo em %s[%d]\n", storage.c_str(), index);
+    logf("SMS novo em %s[%d]", storage.c_str(), index);
     SmsMessage m;
-    if (sms.read(index, m))
-      Serial.printf("  de %s: %s\n", m.sender.c_str(), m.text.c_str());
+    if (sms.read(index, m)) logf("  de %s: %s", m.sender.c_str(), m.text.c_str());
   });
 
   // ── Voz ────────────────────────────────────────────────────
   voice.begin();
   voice.onEvent([](CallState s, const String& number) {
     const char* nomes[] = { "ociosa", "discando", "tocando", "ativa", "ocupado", "sem resposta" };
-    Serial.printf("Chamada: %s (%s)\n", nomes[(int)s], number.c_str());
+    logf("Chamada: %s (%s)", nomes[(int)s], number.c_str());
   });
 
   // ── HTTP ───────────────────────────────────────────────────
+  logf("Testando HTTPS (AT+HTTP*)...");
   HttpResponse r = http.get("https://httpbin.org/get");
-  if (r.status == -1) Serial.println(F("HTTP: sem contexto PDP — confira o APN."));
-  else Serial.printf("HTTP %d, %u bytes:\n%s\n", r.status, (unsigned)r.length, r.body.c_str());
+  if (r.status == -1)      logf("HTTP: sem contexto PDP — confira o APN.");
+  else if (r.status == 715) logf("HTTP: erro 715 = handshake TLS. Falta AT+CSSLCFG=\"enableSNI\",0,1.");
+  else                      logf("HTTP %d, %u bytes.", r.status, (unsigned)r.length);
 
   // ── Firebase ───────────────────────────────────────────────
+  logf("Autenticando no Firebase...");
   firebase.begin(FB_API_KEY, FB_DB_HOST, FB_DEVICE);
   firebase.setTrackEnabled(FB_TRACK);
-  if (firebase.ensureAuth()) Serial.println(F("Firebase: autenticado (usuario anonimo)."));
-  else Serial.printf("Firebase: %s\n", firebase.lastError().c_str());
+  if (firebase.ensureAuth())
+    logf("Firebase: autenticado (usuario anonimo). Envios a cada %lu s, com fix valido.",
+         (unsigned long)(FB_INTERVAL_MS / 1000));
+  else
+    logf("Firebase FALHOU: %s", firebase.lastError().c_str());
+
+  logf("=== inicializacao concluida ===");
 }
 
 void loop() {
@@ -155,11 +224,22 @@ void loop() {
   if (millis() - lastSend > FB_INTERVAL_MS) {
     lastSend = millis();
     const GnssFix& f = gnss.fix();
-    if (f.valid) {
-      if (firebase.sendFix(f))
-        Serial.printf("Firebase: %.6f, %.6f enviado\n", f.lat, f.lon);
-      else
-        Serial.printf("Firebase: falhou — %s\n", firebase.lastError().c_str());
+    if (!f.valid) {
+      // Dizer que está esperando evita a leitura de que o envio travou.
+      logf("Firebase: aguardando fix — nada enviado.");
+    } else if (firebase.sendFix(f)) {
+      fbEnviados++;
+      logf("Firebase: OK  %.6f, %.6f -> /devices/%s (total %lu)",
+           f.lat, f.lon, FB_DEVICE, (unsigned long)fbEnviados);
+    } else {
+      fbFalhas++;
+      logf("Firebase: FALHA (%lu) — %s", (unsigned long)fbFalhas, firebase.lastError().c_str());
     }
+  }
+
+  static uint32_t lastStatus = 0;
+  if (STATUS_INTERVAL_MS && millis() - lastStatus > STATUS_INTERVAL_MS) {
+    lastStatus = millis();
+    printStatus();
   }
 }
