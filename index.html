@@ -2180,14 +2180,24 @@ async function connect() {
   // sair de cena e virar um cabo: ele para de mandar comandos e repassa bytes
   // crus nos dois sentidos, até receber '@NORMAL'.
   if (connected && mode === 'esp32') {
-    log('sys', 'Pedindo modo ponte ao ESP32 (@BRIDGE)...', 'info');
-    const pronto = waitFor(l => l.startsWith('@BRIDGE:ON'), 6000);
-    await writeRaw('@BRIDGE\r\n');
-    if (await pronto) {
+    // Abrir a porta pelo Web Serial pulsa DTR/RTS e reinicia o ESP32, que só
+    // passa a ler a USB depois do setup — algo entre 10 e 25 s, mais se o
+    // módulo demorar a responder. Uma tentativa única quase sempre chegava
+    // cedo demais, então insiste até o firmware entrar no loop.
+    log('sys', 'Pedindo modo ponte ao ESP32 (@BRIDGE)... o ESP32 pode estar reiniciando.', 'info');
+    let emPonte = false;
+    for (let i = 0; i < 15 && !emPonte; i++) {
+      const pronto = waitFor(l => l.includes('@BRIDGE:ON'), 2000);
+      await writeRaw('@BRIDGE\r\n');
+      emPonte = !!(await pronto);
+      if (!emPonte && i === 3) log('sys', 'Aguardando o ESP32 concluir o boot...', 'info');
+    }
+    if (emPonte) {
       log('sys', 'ESP32 em modo ponte: os comandos AT vão direto ao módulo.', 'ok');
     } else {
-      log('sys', 'ESP32 não confirmou o modo ponte. Ele está gravado com firmware que suporta @BRIDGE?', 'err');
-      log('sys', 'Enquanto isso o firmware segue no controle e os comandos daqui serão ignorados.', 'info');
+      log('sys', 'ESP32 não confirmou o modo ponte em 30 s.', 'err');
+      log('sys', 'Confira se ele está gravado com firmware que suporta @BRIDGE (commit 47748fe ou posterior).', 'info');
+      log('sys', 'Sem a ponte o firmware segue no controle e os comandos daqui são ignorados.', 'info');
     }
   }
 

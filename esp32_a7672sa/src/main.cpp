@@ -138,6 +138,15 @@ static void pumpUsb() {
   }
 }
 
+// Atende um pedido de ponte no meio do setup. Sem isto o '@BRIDGE' esperava a
+// inicialização inteira — e quem abre a porta pelo Web Serial reinicia o ESP32
+// justo antes de pedir, então a espera caía sempre em cima do boot.
+static bool ponteSolicitada() {
+  pumpUsb();
+  if (ponteAtiva) logf("Ponte pedida durante o boot: o firmware nao vai inicializar.");
+  return ponteAtiva;
+}
+
 static void printFix(const GnssFix& f) {
   if (!f.valid) {
     logf("GNSS: sem fix ainda (TTFF a frio leva 30-90 s com vista para o ceu)");
@@ -188,6 +197,7 @@ void setup() {
   // Nada de inicializar no escuro: sem o módulo ligado e respondendo, toda a
   // sequência abaixo iria para o vazio e ainda pareceria ter dado certo.
   logf("Ligando o modulo (pulso no PWRKEY, a UART leva ~8 s para subir)...");
+  if (ponteSolicitada()) return;
   if (!modem.ensurePowered(PIN_PWRKEY, PWRKEY_ACTIVE_HIGH)) {
     logf("FALHA: modulo sem resposta — inicializacao ABORTADA.");
     logf("  Verifique nesta ordem:");
@@ -199,6 +209,7 @@ void setup() {
     return;
   }
   logf("Modulo respondeu ao AT.");
+  if (ponteSolicitada()) return;
 
   modem.at("ATE0");        // eco atrapalha o parser
   modem.at("AT+CMEE=2");   // erros por extenso
@@ -206,6 +217,7 @@ void setup() {
   // ── SIM ────────────────────────────────────────────────────
   modem.refreshSim();
   logf("SIM: %s", A7672Core::simText(modem.sim()));
+  if (ponteSolicitada()) return;
 
   // ── GNSS: independe de SIM, então roda de qualquer jeito ───
   if (gnss.powerOn(3)) {
@@ -222,6 +234,8 @@ void setup() {
     logf("O GNSS continua funcionando — os fixes aparecem abaixo, mas nao sobem.");
     return;
   }
+
+  if (ponteSolicitada()) return;
 
   // ── Rede ───────────────────────────────────────────────────
   logf("Registrando na rede (ate 60 s)...");
