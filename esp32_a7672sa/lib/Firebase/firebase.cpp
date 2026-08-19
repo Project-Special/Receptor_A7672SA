@@ -131,12 +131,19 @@ bool A7672Firebase::ensureAuth() {
 }
 
 bool A7672Firebase::put(const String& path, const String& json, const String& method) {
-  // O token vai no header porque é o único lugar sem limite de tamanho neste
-  // caminho — ver o comentário de lib/Tls/tls.h.
-  String headers = "Authorization: Bearer " + _idToken + "\r\n";
+  // O token vai na QUERY, não no header. O Realtime Database recusa idToken em
+  // 'Authorization: Bearer' com 401 "Unauthorized request." — nesse header ele
+  // só aceita access token OAuth2 de conta de serviço. Verificado contra o
+  // banco real: header 401, ?auth= 200.
+  //
+  // Aqui isso é possível porque o request-line é montado por nós sobre o canal
+  // SSL cru; o teto de 600 caracteres de URL é do AT+HTTPPARA, que não entra
+  // neste caminho (ver lib/Tls/tls.h).
+  String url = path + (path.indexOf('?') >= 0 ? "&" : "?") + "auth=" + _idToken;
 
-  TlsResponse r = _t.request(method, _dbHost, path, json, "application/json", headers);
+  TlsResponse r = _t.request(method, _dbHost, url, json, "application/json");
   if (!r.ok) {
+    // `path` sem a query: o token de 861 caracteres no log esconderia o erro.
     _lastError = method + " " + path + " -> HTTP " + String(r.status) + " " + r.body.substring(0, 120);
     // 401 costuma ser token vencido: descarta para o próximo ciclo renovar.
     if (r.status == 401) _idToken = "";

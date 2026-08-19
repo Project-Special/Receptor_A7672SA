@@ -189,8 +189,10 @@ void setup() {
   });
 
   // ── HTTP ───────────────────────────────────────────────────
+  // httpbin.org devolve 503 com frequência, e no log isso parece falha do
+  // módulo quando é só o serviço de teste fora do ar.
   logf("Testando HTTPS (AT+HTTP*)...");
-  HttpResponse r = http.get("https://httpbin.org/get");
+  HttpResponse r = http.get("https://postman-echo.com/get");
   if (r.status == -1)      logf("HTTP: sem contexto PDP — confira o APN.");
   else if (r.status == 715) logf("HTTP: erro 715 = handshake TLS. Falta AT+CSSLCFG=\"enableSNI\",0,1.");
   else                      logf("HTTP %d, %u bytes.", r.status, (unsigned)r.length);
