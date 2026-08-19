@@ -10,3 +10,5 @@ __pycache__/
 # guardar ali um segredo de verdade.
 api_key.txt
 *.secret
+# Senha de Wi-Fi do firmware. O .example fica versionado no lugar dele.
+esp32_a7672sa/src/secrets.h

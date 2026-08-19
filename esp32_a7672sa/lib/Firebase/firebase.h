@@ -64,6 +64,17 @@ public:
   // `level`: "info", "warn" ou "erro".
   bool remoteLog(const String& level, const String& message);
 
+  // Lê /devices/<id>/wifi e guarda na NVS. Devolve true quando as credenciais
+  // mudaram — aí vale reconectar. O cache local existe para o Wi-Fi não
+  // depender de já haver internet: no boot as credenciais saem da NVS.
+  bool fetchWifi(String& ssid, String& pass);
+  static bool wifiSalvo(String& ssid, String& pass);
+
+  // UID do usuário anônimo. Estável entre reinícios (o refreshToken fica na
+  // NVS) e é o que permite restringir a leitura da senha do Wi-Fi só a este
+  // device nas regras do banco.
+  const String& uid() const { return _uid; }
+
   // Atualiza /devices/<id>/status — é o que diz ao app que o device está vivo.
   bool sendStatus(const String& utc, bool hasFix, int sats, int rssi,
                   uint32_t sent, uint32_t failed);
@@ -90,7 +101,7 @@ private:
 
   A7672Tls& _t;
   String _apiKey, _dbHost, _deviceId;
-  String _idToken, _refreshToken;
+  String _idToken, _refreshToken, _uid;
   String _lastError;
   uint32_t _tokenExpiresAt = 0;   // millis() em que o token vence
   bool _track = true;

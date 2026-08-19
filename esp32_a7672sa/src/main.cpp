@@ -9,6 +9,10 @@
 #include <http.h>
 #include <tls.h>
 #include <firebase.h>
+#include <WiFi.h>
+#include <display.h>
+#include <ui.h>
+#include <osm.h>
 
 // ── Pinos ────────────────────────────────────────────────────
 // UART2 do ESP32 ligada à UART principal do módulo (115200 8N1).
@@ -51,6 +55,29 @@ static const uint32_t FB_CONFIG_POLL_MS = 30000;
 // Heartbeat em /status: é por ele que o app sabe que o device está vivo.
 static const uint32_t FB_STATUS_PUSH_MS = 60000;
 
+// ── Wi-Fi (só para o mapa) ───────────────────────────────────
+// Os tiles do OpenStreetMap vêm exclusivamente por aqui e ficam gravados no
+// LittleFS. O chip do A7672 é um SIM IoT com franquia pequena, e uma tela de
+// mapa são 6 a 12 tiles de ~15 KB — baixar isso por dados móveis não se paga.
+// Deixe o aparelho um tempo no Wi-Fi para encher o cache da região; na rua ele
+// desenha do flash, sem rede nenhuma.
+//
+// As credenciais vivem em src/secrets.h, que não é versionado — este repo é
+// publicado no GitHub Pages. Sem esse arquivo o firmware compila igual e o
+// mapa passa a usar só o cache.
+#if __has_include("secrets.h")
+  #include "secrets.h"
+#else
+  #define WIFI_SSID_LOCAL ""
+  #define WIFI_PASS_LOCAL ""
+#endif
+
+static const char* WIFI_SSID = WIFI_SSID_LOCAL;   // vazio = não tenta conectar
+static const char* WIFI_PASS = WIFI_PASS_LOCAL;
+
+// Zoom do mapa. 16 mostra ~2 quarteirões na largura da tela.
+static const int MAPA_ZOOM = 16;
+
 // ── Log no monitor (Serial0 / USB) ───────────────────────────
 // true ecoa todo o tráfego AT. Verboso, mas é o que mostra onde a conversa
 // com o módulo trava — deixe ligado até a placa estar validada.
@@ -58,6 +85,8 @@ static const bool DEBUG_AT = true;
 
 // Resumo periódico do estado. 0 desliga.
 static const uint32_t STATUS_INTERVAL_MS = 30000;
+
+TFT_eSPI   tft;
 
 A7672Core  modem;
 A7672Net   net(modem);
@@ -147,6 +176,29 @@ static bool ponteSolicitada() {
   return ponteAtiva;
 }
 
+// Conecta usando o que o app mandou (NVS) ou, na falta, o secrets.h.
+static void conectarWifi() {
+  String ssid, pass;
+  bool doApp = A7672Firebase::wifiSalvo(ssid, pass);
+  if (!doApp) { ssid = WIFI_SSID; pass = WIFI_PASS; }
+
+  if (!ssid.length()) {
+    logf("Wi-Fi: nenhuma rede configurada — mapa so do cache.");
+    logf("       Configure pela aba Firebase do app, em 'Wi-Fi do ESP32'.");
+    return;
+  }
+
+  logf("Wi-Fi: conectando a \"%s\" (%s, so para baixar mapa)...",
+       ssid.c_str(), doApp ? "definida pelo app" : "do secrets.h");
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid.c_str(), pass.c_str());
+  uint32_t ate = millis() + 10000;
+  while (WiFi.status() != WL_CONNECTED && millis() < ate) delay(200);
+
+  if (WiFi.status() == WL_CONNECTED) logf("Wi-Fi: %s", WiFi.localIP().toString().c_str());
+  else                               logf("Wi-Fi: nao conectou — mapa so do cache.");
+}
+
 static void printFix(const GnssFix& f) {
   if (!f.valid) {
     logf("GNSS: sem fix ainda (TTFF a frio leva 30-90 s com vista para o ceu)");
@@ -183,6 +235,18 @@ void setup() {
   delay(300);
   Serial.println();
   logf("=== A7672SA / ESP32 ===");
+
+  // O display sobe antes de tudo: se o módulo não responder, a tela é o único
+  // lugar onde o motivo aparece para quem está com o aparelho na mão.
+  ui.begin();
+  ui.splash("Rastreador GPS", "iniciando...");
+  if (mapa.begin()) logf("Cache de mapa: %u tiles no LittleFS.", (unsigned)mapa.tilesEmCache());
+  else              logf("Cache de mapa indisponivel: %s", mapa.ultimoErro().c_str());
+
+  // Wi-Fi serve só para encher o cache de tiles; nada do rastreamento depende
+  // dele. A rede configurada pelo app (guardada na NVS) tem precedência sobre
+  // o secrets.h, que é só o padrão de fábrica.
+  conectarWifi();
   logf("UART2 @ 115200 8N1 — RX=GPIO%d TX=GPIO%d | PWRKEY=GPIO%d (ativo em %s) | STATUS=%s",
        PIN_RX, PIN_TX, PIN_PWRKEY, PWRKEY_ACTIVE_HIGH ? "ALTO" : "BAIXO",
        PIN_STATUS >= 0 ? String(String("GPIO") + PIN_STATUS).c_str() : "nao usado");
@@ -335,6 +399,15 @@ void loop() {
       firebase.remoteLog("info", firebase.enabled() ? "Envio ativado pelo app"
                                                     : "Envio desativado pelo app");
     }
+
+    // Rede do mapa trocada pelo app: reconecta na hora, sem esperar reboot.
+    String ssid, pass;
+    if (firebase.fetchWifi(ssid, pass)) {
+      logf("COMANDO do app: rede Wi-Fi trocada para \"%s\".", ssid.c_str());
+      firebase.remoteLog("info", "Wi-Fi trocado para " + ssid);
+      WiFi.disconnect();
+      conectarWifi();
+    }
   }
 
   // ── Envio periódico ─────────────────────────────────────────
@@ -381,5 +454,34 @@ void loop() {
   if (STATUS_INTERVAL_MS && millis() - lastStatus > STATUS_INTERVAL_MS) {
     lastStatus = millis();
     printStatus();
+  }
+
+  // ── Tela ────────────────────────────────────────────────────
+  static uint32_t lastUi = 0;
+  if (millis() - lastUi > 500) {
+    lastUi = millis();
+    const GnssFix& f = gnss.fix();
+    UiEstado e;
+    e.fix = f.valid; e.mode = f.mode;
+    e.lat = f.lat; e.lon = f.lon; e.alt = f.altitude;
+    e.kmh = f.speedKmh; e.hdop = f.hdop; e.sats = f.svTotal;
+    e.utc = A7672Firebase::isoTimestamp(f.utcDate, f.utcTime);
+    e.operadora = netCache.operatorName; e.tech = netCache.tech;
+    e.dbm = netCache.dbm; e.online = netCache.ip.length() > 0;
+    e.envioAtivo = firebase.enabled();
+    e.enviados = fbEnviados; e.falhas = fbFalhas;
+    e.wifi = (WiFi.status() == WL_CONNECTED);
+    e.tilesCache = mapa.tilesEmCache();
+    ui.atualizar(e);
+  }
+
+  // Enche o cache de tiles enquanto houver Wi-Fi. Poucos por vez: cada
+  // download segura o loop, e o rastreamento não pode ficar esperando mapa.
+  static uint32_t lastTile = 0;
+  if (WiFi.status() == WL_CONNECTED && gnss.fix().valid
+      && millis() - lastTile > 3000) {
+    lastTile = millis();
+    const GnssFix& f = gnss.fix();
+    if (mapa.precarregar(f.lat, f.lon, MAPA_ZOOM, 1, 2) > 0) ui.marcarMapaSujo();
   }
 }

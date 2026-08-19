@@ -493,6 +493,30 @@
     .pill.on  { color: var(--green); border-color: #3fb95055; background: #16281a; }
     .pill.off { color: var(--text-dim); }
     .pill.err { color: var(--red); border-color: #f8514955; background: #2b1517; }
+    /* ── Aba ESP32 ─────────────────────────────────────────── */
+    .esp-head { display: flex; align-items: center; justify-content: space-between;
+                gap: 12px; flex-wrap: wrap; }
+    .esp-sub  { color: var(--text-dim); font-size: 12px; }
+    .esp-pill { padding: 5px 14px; border-radius: 999px; font-size: 12px; font-weight: 600;
+                border: 1px solid var(--border); color: var(--text-dim); white-space: nowrap; }
+    .esp-pill.on   { color: var(--green); border-color: #2f6c55; background: #10251c; }
+    .esp-pill.off  { color: #d29922;      border-color: #6b551a; background: #241f10; }
+    .esp-pill.dead { color: var(--red);   border-color: #6b2222; background: #241214; }
+
+    /* Cada bloco é um assunto: rastreamento, Wi-Fi, logs. Sem a separação, a
+       aba virava uma parede de campos sem hierarquia. */
+    .esp-sec   { border: 1px solid var(--border); border-radius: 10px;
+                 padding: 12px 14px; margin-top: 4px; background: rgba(255,255,255,0.015); }
+    .esp-sec-t { font-size: 13px; font-weight: 600; color: var(--text);
+                 margin-bottom: 10px; display: flex; align-items: baseline;
+                 gap: 10px; flex-wrap: wrap; }
+    .esp-hint  { font-weight: 400; font-size: 11px; color: var(--text-dim); }
+    .esp-nota  { font-size: 11px; color: var(--text-dim); margin-top: 8px; line-height: 1.5; }
+    @media (max-width: 768px) {
+      .esp-sec { padding: 10px; }
+      .esp-head { flex-direction: column; align-items: flex-start; gap: 6px; }
+    }
+
     #fb-log .ok,   #fbr-log .ok   { color: var(--green); }
     #fb-log .err,  #fbr-log .err  { color: var(--red); }
     #fb-log .warn, #fbr-log .warn { color: #d29922; }
@@ -1112,6 +1136,7 @@
       <div class="tab" onclick="showTab('rede', this)">Rede</div>
       <div class="tab" onclick="showTab('map', this)">Mapa</div>
       <div class="tab" onclick="showTab('firebase', this)">Firebase</div>
+      <div class="tab" onclick="showTab('esp32', this)">ESP32</div>
       <div class="tab" onclick="showTab('sms', this)">SMS</div>
       <div class="tab" onclick="showTab('voz', this)">Voz</div>
       <div class="tab" onclick="showTab('http', this)">HTTP</div>
@@ -1677,52 +1702,25 @@
             <div class="console-box" id="fb-log" style="min-height:90px;">Preencha host e API key, depois use "Testar conexão".</div>
           </div>
 
-          <!-- ── Controle remoto do ESP32 ─────────────────────────
-               O device roda longe daqui: o unico canal entre os dois e o
-               proprio banco. O app escreve a ordem em /config e le o que o
-               device reporta em /status e /logs. -->
-          <h3 style="margin-top:6px;">Rastreador ESP32 — controle remoto</h3>
+        </div>
+      </div>
 
-          <div class="form-row">
-            <div class="form-group" style="max-width:200px;">
-              <label>Device do ESP32</label>
-              <input id="fbRemoteDevice" type="text" value="esp32-01" onchange="fbRemoteLoadConfig()" />
+      <!-- ══════════ ESP32 (rastreador remoto) ══════════
+           O device roda longe daqui e não fala com o navegador: o banco é o
+           único canal. O app escreve a ordem em /config e /wifi, e lê o que o
+           device reporta em /status e /logs. -->
+      <div class="panel" id="panel-esp32">
+        <div class="pane">
+
+          <div class="esp-head">
+            <div>
+              <h3 style="margin:0;">Rastreador ESP32</h3>
+              <span class="esp-sub" id="esp-sub">configure o device e acompanhe o que ele está fazendo</span>
             </div>
-            <div class="form-group" style="max-width:150px;">
-              <label>Publicar a cada (s)</label>
-              <input id="fbRemoteInterval" type="number" min="5" max="3600" value="30" />
-            </div>
-            <div class="form-group" style="max-width:170px;">
-              <label>Distância mínima (m)</label>
-              <input id="fbRemoteMinDist" type="number" min="0" max="10000" value="0"
-                     title="0 envia todo ciclo. Parado, o GPS oscila alguns metros e cada oscilação vira um ponto novo; 10 a 25 m corta isso." />
-            </div>
+            <div class="esp-pill" id="esp-online">—</div>
           </div>
 
-          <div class="form-row">
-            <div class="form-group" style="max-width:170px;">
-              <label>Heartbeat (s)</label>
-              <input id="fbRemoteStatusEvery" type="number" min="10" max="3600" value="60" />
-            </div>
-            <div class="form-group" style="max-width:210px;">
-              <label>Histórico no ESP32</label>
-              <select id="fbRemoteTrack">
-                <option value="1" selected>Última + histórico do dia</option>
-                <option value="0">Só a última posição</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="btn-row">
-            <button class="action-btn" id="fbRemoteOnBtn" onclick="fbRemoteEnable(true)">▶️ Ativar envio</button>
-            <button class="action-btn secondary" onclick="fbRemoteEnable(false)">⏹️ Desativar envio</button>
-            <button class="action-btn" onclick="fbRemoteApplyParams()">💾 Aplicar parâmetros</button>
-            <button class="action-btn secondary" onclick="fbRemoteLoadConfig()">📥 Ler config do device</button>
-            <button class="action-btn secondary" onclick="fbRemoteRefresh()">🔄 Atualizar status</button>
-            <button class="action-btn secondary" id="fbRemoteAutoBtn" onclick="fbRemoteAutoToggle()">👁️ Monitorar</button>
-            <button class="action-btn secondary" onclick="fbRemoteClearLogs()">🗑️ Limpar logs</button>
-          </div>
-
+          <!-- ── Estado ────────────────────────────────────────── -->
           <div class="info-grid">
             <div class="info-card"><div class="card-label">Device</div><div class="card-value" id="fbr-state" style="font-size:15px;">--</div></div>
             <div class="info-card"><div class="card-label">Envio</div><div class="card-value" id="fbr-enabled" style="font-size:15px;">--</div></div>
@@ -1734,10 +1732,81 @@
             <div class="info-card"><div class="card-label">Ligado há</div><div class="card-value" id="fbr-up" style="font-size:15px;">--</div></div>
           </div>
 
-          <div class="form-group" style="flex:1;min-height:0;">
-            <label>Logs do ESP32 (vindos do banco)</label>
-            <div class="console-box" id="fbr-log">Informe o device e use "Atualizar status".</div>
+          <!-- ── Identificação e rastreamento ──────────────────── -->
+          <div class="esp-sec">
+            <div class="esp-sec-t">📍 Rastreamento</div>
+            <div class="form-row">
+              <div class="form-group" style="max-width:190px;">
+                <label>ID do device</label>
+                <input id="fbRemoteDevice" type="text" value="esp32-01" onchange="fbRemoteLoadConfig()" />
+              </div>
+              <div class="form-group" style="max-width:150px;">
+                <label>Publicar a cada (s)</label>
+                <input id="fbRemoteInterval" type="number" min="5" max="3600" value="30" />
+              </div>
+              <div class="form-group" style="max-width:160px;">
+                <label>Distância mínima (m)</label>
+                <input id="fbRemoteMinDist" type="number" min="0" max="10000" value="0"
+                       title="0 envia todo ciclo. Parado, o GPS oscila 7 a 17 m e cada oscilação vira um ponto novo; 15 a 25 m corta isso." />
+              </div>
+              <div class="form-group" style="max-width:140px;">
+                <label>Heartbeat (s)</label>
+                <input id="fbRemoteStatusEvery" type="number" min="10" max="3600" value="60" />
+              </div>
+              <div class="form-group" style="max-width:200px;">
+                <label>Histórico</label>
+                <select id="fbRemoteTrack">
+                  <option value="1" selected>Última + histórico do dia</option>
+                  <option value="0">Só a última posição</option>
+                </select>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button class="action-btn" id="fbRemoteOnBtn" onclick="fbRemoteEnable(true)">▶️ Ativar envio</button>
+              <button class="action-btn secondary" onclick="fbRemoteEnable(false)">⏹️ Desativar envio</button>
+              <button class="action-btn" onclick="fbRemoteApplyParams()">💾 Aplicar parâmetros</button>
+              <button class="action-btn secondary" onclick="fbRemoteLoadConfig()">📥 Ler do device</button>
+            </div>
           </div>
+
+          <!-- ── Wi-Fi (só para o mapa) ────────────────────────── -->
+          <div class="esp-sec">
+            <div class="esp-sec-t">📶 Wi-Fi do ESP32
+              <span class="esp-hint">usado só para baixar os tiles do mapa — o rastreamento vai pelo chip</span>
+            </div>
+            <div class="form-row">
+              <div class="form-group" style="max-width:240px;">
+                <label>Rede</label>
+                <input id="fbWifiSsid" type="text" placeholder="nome da rede" autocomplete="off" />
+              </div>
+              <div class="form-group" style="max-width:240px;">
+                <label>Senha</label>
+                <input id="fbWifiPass" type="password" placeholder="senha da rede" autocomplete="new-password" />
+              </div>
+              <div class="form-group" style="max-width:180px;">
+                <label>&nbsp;</label>
+                <button class="action-btn" onclick="fbRemoteWifi()">📶 Enviar Wi-Fi</button>
+              </div>
+            </div>
+            <div class="esp-nota">
+              A senha não fica salva neste navegador: é enviada ao banco e o campo é limpo.
+              As regras impedem que o app leia de volta — só o próprio device tem permissão.
+            </div>
+          </div>
+
+          <!-- ── Logs vindos do device ─────────────────────────── -->
+          <div class="esp-sec" style="flex:1;min-height:0;display:flex;flex-direction:column;">
+            <div class="esp-sec-t">📜 Logs do device
+              <span class="esp-hint">gravados pelo ESP32 no banco, não por este navegador</span>
+            </div>
+            <div class="btn-row">
+              <button class="action-btn secondary" onclick="fbRemoteRefresh()">🔄 Atualizar</button>
+              <button class="action-btn secondary" id="fbRemoteAutoBtn" onclick="fbRemoteAutoToggle()">👁️ Monitorar</button>
+              <button class="action-btn secondary" onclick="fbRemoteClearLogs()">🗑️ Limpar logs</button>
+            </div>
+            <div class="console-box" id="fbr-log" style="flex:1;min-height:110px;">Informe o device e use "Atualizar".</div>
+          </div>
+
         </div>
       </div>
 
@@ -4772,6 +4841,28 @@ async function fbRemoteEnable(on) {
   }
 }
 
+// Envia a rede do mapa para o ESP32. A senha vai para o banco e some daqui:
+// nao entra no localStorage nem fica no campo depois de enviada.
+async function fbRemoteWifi() {
+  const ssid = (document.getElementById('fbWifiSsid').value || '').trim();
+  const pass = document.getElementById('fbWifiPass').value || '';
+  if (!ssid) { alert('Informe o nome da rede.'); return; }
+  if (!confirm(`Enviar a rede "${ssid}" para ${fbRemoteDevice()}?\n\n`
+             + 'A senha fica gravada no banco para o device ler. '
+             + 'As regras impedem que o app leia de volta.')) return;
+
+  try {
+    if (!await fbrPatchConfig({})) return;   // valida host/key antes de mandar senha
+    await fbWrite(`/devices/${encodeURIComponent(fbRemoteDevice())}/wifi.json`,
+                  { ssid, pass }, 'PUT');
+    document.getElementById('fbWifiPass').value = '';   // não deixa a senha na tela
+    fbLog(`Wi-Fi enviado para ${fbRemoteDevice()}: rede "${ssid}".`, 'ok');
+    fbrLog(`>> wi-fi: rede "${ssid}" — o ESP32 reconecta no proximo ciclo (ate ~30 s)`, 'warn');
+  } catch (e) {
+    fbLog(`Falha ao enviar Wi-Fi: ${e.message}`, 'err');
+  }
+}
+
 async function fbRemoteApplyParams() {
   const p = {
     interval:    fbrNum('fbRemoteInterval', 5, 3600, 30),
@@ -4832,11 +4923,23 @@ async function fbRemoteRefresh() {
     const st = await fbGet(`/devices/${encodeURIComponent(dev)}/status.json`);
     if (!st) {
       setText('fbr-state', 'sem status');
+      const selo = document.getElementById('esp-online');
+      if (selo) { selo.textContent = '● nunca reportou'; selo.className = 'esp-pill dead'; }
       fbrLog(`(nenhum status em /devices/${dev} — o ESP32 ainda nao reportou)`, 'warn');
     } else {
       // O heartbeat sai a cada 60 s; passou muito disso, o device sumiu.
       const t = Date.parse(st.seen || '');
       const vivo = !isNaN(t) && (Date.now() - t) < 180000;
+
+      // Selo do topo: junta "está vivo?" com "está enviando?", que é a
+      // pergunta que se faz ao abrir a aba.
+      const selo = document.getElementById('esp-online');
+      if (selo) {
+        selo.textContent = !vivo ? '● sem contato' : (st.enabled ? '● online — enviando' : '● online — parado');
+        selo.className = 'esp-pill ' + (!vivo ? 'dead' : (st.enabled ? 'on' : 'off'));
+      }
+      setText('esp-sub', `${fbRemoteDevice()} · ${st.sats ?? '--'} satélites · ${st.rssi ?? '--'} dBm`);
+
       setText('fbr-state',   vivo ? 'online' : 'sem contato');
       setText('fbr-enabled', st.enabled ? 'ATIVO' : 'parado');
       setText('fbr-fix',     st.fix ? `fix, ${st.sats ?? '--'} sat` : 'sem fix');
@@ -5503,6 +5606,14 @@ function showTab(name, el) {
 
   if (el && typeof el !== 'string') el.classList.add('active');
   else document.querySelector(`.tab[onclick*="'${name}'"]`)?.classList.add('active');
+
+  // Abrir a aba já traz o estado: obrigar a clicar em "Atualizar" para ver se
+  // o device está vivo é trabalho que a tela pode fazer sozinha.
+  if (name === 'esp32') {
+    const c = firebaseCfg();
+    if (c.host && c.key) { fbRemoteRefresh(); fbRemoteLoadConfig(); }
+    else fbrLog('Preencha host e Web API Key na aba Firebase primeiro.', 'warn');
+  }
 
   if (name === 'map') {
     // No celular a barra de conexão sozinha comia ~200px — mais do que o mapa

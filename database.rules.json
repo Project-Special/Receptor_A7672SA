@@ -2,10 +2,10 @@
   "rules": {
     "devices": {
       "$device": {
-        ".read": "auth != null",
         ".write": "auth != null",
 
         "last": {
+          ".read": "auth != null",
           ".validate": "newData.hasChildren(['lat','lon'])",
           "lat": { ".validate": "newData.isNumber() && newData.val() >= -90  && newData.val() <= 90" },
           "lon": { ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180" },
@@ -14,6 +14,7 @@
         },
 
         "track": {
+          ".read": "auth != null",
           "$day": {
             "$entry": {
               ".validate": "newData.hasChildren(['lat','lon'])",
@@ -26,6 +27,7 @@
         },
 
         "config": {
+          ".read": "auth != null",
           "enabled":     { ".validate": "newData.isBoolean()" },
           "track":       { ".validate": "newData.isBoolean()" },
           "interval":    { ".validate": "newData.isNumber() && newData.val() >= 5 && newData.val() <= 3600" },
@@ -35,16 +37,26 @@
         },
 
         "status": {
+          ".read": "auth != null",
           "$campo": { ".validate": "newData.isNumber() || newData.isString() || newData.isBoolean()" }
         },
 
         "logs": {
+          ".read": "auth != null",
           "$entry": {
             ".validate": "newData.hasChildren(['lvl','msg'])",
             "lvl": { ".validate": "newData.isString() && newData.val().length <= 8" },
             "msg": { ".validate": "newData.isString() && newData.val().length <= 200" },
             "up":  { ".validate": "newData.isNumber()" }
           }
+        },
+
+        "wifi": {
+          "//": "Senha da rede do mapa. Qualquer um autenticado ESCREVE (é o app mandando a rede nova), mas só o próprio device LÊ. Por isso o .read não pode estar no nível $device: no Realtime Database a permissão do pai cascateia e não há como restringi-la num filho. Troque o uid ao trocar de placa — ele aparece em /devices/<id>/status/uid.",
+          ".read": "auth != null && auth.uid === 'aSTJrpfkHAVXu5B6XrlQWFJQFlo2'",
+          "ssid": { ".validate": "newData.isString() && newData.val().length <= 64" },
+          "pass": { ".validate": "newData.isString() && newData.val().length <= 64" },
+          "$outro": { ".validate": false }
         }
       }
     }

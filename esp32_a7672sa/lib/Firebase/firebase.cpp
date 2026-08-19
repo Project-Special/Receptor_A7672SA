@@ -88,6 +88,7 @@ bool A7672Firebase::signUpAnonymous() {
     _lastError = "signUp sem idToken na resposta";
     return false;
   }
+  _uid = jsonString(r.body, "localId");
   storeTokens(id, jsonString(r.body, "refreshToken"), jsonString(r.body, "expiresIn").toInt());
   _lastError = "";
   return true;
@@ -108,6 +109,7 @@ bool A7672Firebase::refreshIdToken() {
   String id = jsonString(r.body, "id_token");
   if (id.isEmpty()) return false;
 
+  if (_uid.isEmpty()) _uid = jsonString(r.body, "user_id");
   storeTokens(id, jsonString(r.body, "refresh_token"), jsonString(r.body, "expires_in").toInt());
   _lastError = "";
   return true;
@@ -214,6 +216,43 @@ bool A7672Firebase::fetchConfig() {
   return true;
 }
 
+static const char* kNvsSsid = "wifi_ssid";
+static const char* kNvsPass = "wifi_pass";
+
+bool A7672Firebase::wifiSalvo(String& ssid, String& pass) {
+  Preferences p;
+  if (!p.begin(kNvsSpace, true)) return false;
+  ssid = p.getString(kNvsSsid, "");
+  pass = p.getString(kNvsPass, "");
+  p.end();
+  return ssid.length() > 0;
+}
+
+bool A7672Firebase::fetchWifi(String& ssid, String& pass) {
+  String body;
+  if (!fetch("/devices/" + _deviceId + "/wifi.json", body)) return false;
+  if (body.length() == 0 || body == "null") return false;
+
+  String s = jsonString(body, "ssid");
+  String p = jsonString(body, "pass");
+  if (s.isEmpty()) return false;
+
+  String sAtual, pAtual;
+  wifiSalvo(sAtual, pAtual);
+  if (s == sAtual && p == pAtual) { ssid = s; pass = p; return false; }
+
+  // Guarda localmente: no próximo boot o Wi-Fi sobe sem depender de já haver
+  // internet para ler o banco.
+  Preferences prefs;
+  if (prefs.begin(kNvsSpace, false)) {
+    prefs.putString(kNvsSsid, s);
+    prefs.putString(kNvsPass, p);
+    prefs.end();
+  }
+  ssid = s; pass = p;
+  return true;
+}
+
 bool A7672Firebase::remoteLog(const String& level, const String& message) {
   // Escapa o que quebraria o JSON. As mensagens vêm do próprio firmware, mas
   // muitas carregam resposta do módulo, com aspas e barras dentro.
@@ -244,6 +283,7 @@ bool A7672Firebase::sendStatus(const String& utc, bool hasFix, int sats, int rss
   json += ",\"failed\":" + String(failed);
   json += ",\"up\":"     + String(millis() / 1000);
   if (utc.length()) json += ",\"seen\":\"" + utc + "\"";
+  if (_uid.length()) json += ",\"uid\":\"" + _uid + "\"";
   json += "}";
   return put("/devices/" + _deviceId + "/status.json", json, "PUT");
 }
