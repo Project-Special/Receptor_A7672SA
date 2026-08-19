@@ -1,5 +1,5 @@
 // A7672SA Controller — Service Worker
-const CACHE = 'a7672sa-v6';
+const CACHE = 'a7672sa-v7';
 const PRECACHE = [
   './index.html',
   './manifest.json',

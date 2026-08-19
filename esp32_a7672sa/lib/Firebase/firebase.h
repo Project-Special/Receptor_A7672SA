@@ -36,6 +36,10 @@ public:
   // Escreve a posição nos dois caminhos. Sem fix válido não envia nada.
   bool sendFix(const GnssFix& fix);
 
+  // Desligado, grava só a última posição — metade das escritas, sem histórico.
+  // Equivale ao seletor "Histórico" da aba Firebase do app.
+  void setTrackEnabled(bool on) { _track = on; }
+
   bool authenticated() const { return _idToken.length() > 0; }
   const String& lastError() const { return _lastError; }
 
@@ -59,4 +63,5 @@ private:
   String _idToken, _refreshToken;
   String _lastError;
   uint32_t _tokenExpiresAt = 0;   // millis() em que o token vence
+  bool _track = true;
 };

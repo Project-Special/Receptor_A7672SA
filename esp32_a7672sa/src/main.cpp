@@ -32,10 +32,16 @@ static const char* APN = "em.mnc051.mcc724.gprs";
 // final. Trocar por chave/host próprios antes de gravar.
 static const char* FB_API_KEY = "AIzaSyAZzlDyHvhqszlj8dq2Iy8VuT9uTS3sv9I";
 static const char* FB_DB_HOST = "rastreador-gps-c1dc7-default-rtdb.firebaseio.com";
-static const char* FB_DEVICE  = "rastreador01";
+// Cada dispositivo precisa do seu ID. O app usa "rastreador01" por padrão, então
+// deixar os dois iguais faria firmware e navegador escreverem na mesma trilha.
+static const char* FB_DEVICE  = "esp32-01";
 
 // Intervalo entre envios. Cada envio são duas escritas (última + histórico).
 static const uint32_t FB_INTERVAL_MS = 30000;
+
+// false grava só a última posição, sem histórico — o mesmo que o seletor
+// "Histórico" da aba Firebase do app.
+static const bool FB_TRACK = true;
 
 A7672Core  modem;
 A7672Net   net(modem);
@@ -128,6 +134,7 @@ void setup() {
 
   // ── Firebase ───────────────────────────────────────────────
   firebase.begin(FB_API_KEY, FB_DB_HOST, FB_DEVICE);
+  firebase.setTrackEnabled(FB_TRACK);
   if (firebase.ensureAuth()) Serial.println(F("Firebase: autenticado (usuario anonimo)."));
   else Serial.printf("Firebase: %s\n", firebase.lastError().c_str());
 }

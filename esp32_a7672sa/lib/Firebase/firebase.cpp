@@ -163,22 +163,27 @@ bool A7672Firebase::sendFix(const GnssFix& fix) {
 
   String utc = isoTimestamp(fix.utcDate, fix.utcTime);
 
+  // Campo ausente é omitido, não zerado. toFloat() devolve 0.0 para campo
+  // vazio do NMEA, e gravar "alt":0.0 afirmaria nível do mar — que num fix 2D
+  // é invenção. O app faz a mesma omissão; manter os dois iguais evita que a
+  // mesma trilha mude de forma dependendo de quem a gravou.
   String json = "{";
   json += "\"lat\":"   + String(fix.lat, 6);
   json += ",\"lon\":"  + String(fix.lon, 6);
-  if (utc.length()) json += ",\"utc\":\"" + utc + "\"";
-  json += ",\"alt\":"  + String(fix.altitude, 1);
+  if (utc.length())    json += ",\"utc\":\"" + utc + "\"";
+  if (fix.mode == 3)   json += ",\"alt\":"  + String(fix.altitude, 1);
   json += ",\"kmh\":"  + String(fix.speedKmh, 1);
-  json += ",\"sats\":" + String(fix.svTotal);
-  json += ",\"hdop\":" + String(fix.hdop, 2);
+  if (fix.svTotal)     json += ",\"sats\":" + String(fix.svTotal);
+  if (fix.hdop > 0)    json += ",\"hdop\":" + String(fix.hdop, 2);
   json += "}";
 
   String base = "/devices/" + _deviceId;
 
   // A última posição sobrescreve (PUT); o histórico acumula (POST gera a chave)
   // dentro do nó do dia, de modo que cada data vira um bloco separado.
-  bool okLast  = put(base + "/last.json", json, "PUT");
-  bool okTrack = put(base + "/track/" + dayKey(utc) + ".json", json, "POST");
+  bool okLast = put(base + "/last.json", json, "PUT");
+  if (!_track) return okLast;
 
+  bool okTrack = put(base + "/track/" + dayKey(utc) + ".json", json, "POST");
   return okLast && okTrack;
 }

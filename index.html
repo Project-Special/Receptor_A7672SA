@@ -3374,6 +3374,7 @@ function parseCGNSSINFO(line) {
   lastFixTs = Date.now();
   lastFix = {
     lat, lon,
+    mode: p(0) === '3' ? 3 : 2,
     alt:  isNaN(alt) ? null : alt,
     kmh:  spdKmh,
     sats: total,
@@ -3582,6 +3583,7 @@ function renderNmeaFix() {
   lastFixTs = Date.now();
   lastFix = {
     lat: s.lat, lon: s.lon,
+    mode: s.fixMode === 3 ? 3 : 2,
     alt: alt,
     kmh: spdKmh,
     sats: total,
@@ -4489,10 +4491,14 @@ async function fbWrite(path, payload, method) {
   return r.json().catch(() => null);
 }
 
+// Mesmos critérios de lib/Firebase/firebase.cpp: campo ausente é omitido, não
+// zerado. Altitude só entra em fix 3D — num 2D o receptor às vezes devolve 0,
+// e gravar isso afirmaria nível do mar. Os dois lados precisam concordar, senão
+// a mesma trilha muda de forma conforme quem a gravou.
 function fbPayload(fix) {
   const p = { lat: +fix.lat.toFixed(6), lon: +fix.lon.toFixed(6) };
   if (fix.utc) p.utc = fix.utc;
-  if (fix.alt !== null && fix.alt !== undefined) p.alt = +fix.alt.toFixed(1);
+  if (fix.mode === 3 && fix.alt !== null && fix.alt !== undefined) p.alt = +fix.alt.toFixed(1);
   if (fix.kmh !== undefined) p.kmh = +fix.kmh.toFixed(1);
   if (fix.sats) p.sats = fix.sats;
   if (fix.hdop) p.hdop = +fix.hdop.toFixed(2);
