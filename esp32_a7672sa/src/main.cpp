@@ -313,7 +313,16 @@ static void pumpUsb() {
       if (cmd.startsWith("@WIFI")) { comandoWifi(cmd); continue; }
       if (cmd == "@SCAN")          { comandoScan();    continue; }
       if (cmd.startsWith("@CFG"))  { comandoCfg(cmd);  continue; }
-      if (ponteAtiva && cmd.length()) modem.write(cmd + "\r\n");
+      if (ponteAtiva && cmd.length()) { modem.write(cmd + "\r\n"); continue; }
+
+      // Fora da ponte o firmware é dono da UART, então um comando AT vindo do
+      // PC não pode ser repassado — mas engoli-lo calado é pior: quem enviou
+      // fica esperando uma resposta que nunca vem, achando que o módulo é que
+      // não respondeu. Foi o que aconteceu ao tentar mandar SMS.
+      if (cmd.length() && !cmd.startsWith("@")) {
+        Serial.println("@ERRO:sem ponte — mande @BRIDGE antes de comandos AT (ignorado: "
+                       + cmd.substring(0, 24) + ")");
+      }
       continue;
     }
 

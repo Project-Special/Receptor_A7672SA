@@ -2591,6 +2591,20 @@ function logRx(line) {
   //
   // Só o '<< ' sai. O '>> ' marca o que o ESP32 ENVIOU ao módulo, e tratar
   // comando como resposta daria falso positivo nos waiters.
+  // O ESP32 avisa quando recebeu um comando AT sem estar em ponte. Sem isto o
+  // app ficaria esperando resposta de um comando que nunca chegou ao módulo —
+  // era o que fazia "enviar SMS" falhar sem dizer por quê.
+  if (line.startsWith('@ERRO:sem ponte')) {
+    log('sys', 'ESP32 não está em modo ponte: o comando não chegou ao módulo.', 'err');
+    if (getConnMode() === 'esp32') {
+      log('sys', 'Reenviando @BRIDGE...', 'info');
+      writeRaw('@BRIDGE\r\n');
+    } else {
+      log('sys', 'Troque Interface para "ESP32 (ponte USB)" e reconecte.', 'info');
+    }
+    return;
+  }
+
   const resp = line.startsWith('<<') ? line.replace(/^<<\s?/, '') : line;
   notifyWaiters(resp);
   try { parseResponse(resp); } catch (e) { console.error('parse', resp, e); }
