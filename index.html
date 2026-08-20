@@ -195,9 +195,9 @@
       flex-direction: column;
       gap: 14px;
       overflow-y: auto;
-      /* Item flex tem min-width:auto por padrão e não encolhe abaixo do
-         conteúdo; como o .panel corta com overflow:hidden, uma fileira larga
-         era recortada à direita em vez de quebrar. */
+      /* min-width aqui é no-op (o eixo principal do .panel é o vertical, e o
+         mínimo automático só vale nele); quem resolveu o recorte foi o
+         flex-wrap do .form-row. Fica por segurança se o eixo mudar. */
       min-width: 0;
     }
 
@@ -375,6 +375,17 @@
     .view-toggle:hover { color: var(--text); border-color: #58a6ff44; }
     .view-toggle.active { background: #1f6feb33; border-color: #1f6feb; color: #58a6ff; }
 
+    /* Botão compacto de "Aplicar" dentro dos grupos inline do GNSS. Era um
+       style= inline, que por ter especificidade de inline vencia a regra de
+       alvo de toque do celular: o botão ficava com 44px de altura mas texto
+       de 11px e padding de 3px, metade da intenção. */
+    .btn-mini { padding: 3px 10px; font-size: 11px; }
+    @media (max-width: 768px) {
+      .btn-mini { padding: 8px 12px; font-size: 14px; }
+    }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
     .info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
 
     /* Altura fixa + rodapé ancorado: os cards ficam idênticos mesmo com
@@ -453,10 +464,16 @@
     /* Escala única de larguras. Antes eram 13 valores escolhidos a olho, com
        campos de mesma natureza divergindo — "Porta" (4 dígitos) tinha 130px e
        "Contexto SSL" (1 dígito) tinha 170px. */
-    .f-curto { flex-basis: 150px; max-width: 150px; }
-    .f-medio { flex-basis: 200px; max-width: 200px; }
-    .f-longo { flex-basis: 240px; max-width: 240px; }
-    .f-xl    { flex-basis: 280px; max-width: 280px; }
+    /* O seletor precisa ser tão específico quanto `.form-row .form-group`
+       (0,2,0), senão o `flex: 1 1 auto` de lá vence e zera o flex-basis daqui:
+       sobrava só o max-width, e com flex-grow:1 os campos cresciam
+       proporcionalmente ao conteúdo — larguras diferentes para a mesma classe.
+       flex-grow:0 é o que garante que dois campos da mesma faixa fiquem
+       idênticos, mesmo com rótulos de tamanhos diferentes. */
+    .form-row .form-group.f-curto { flex: 0 0 150px; max-width: 150px; }
+    .form-row .form-group.f-medio { flex: 0 0 200px; max-width: 200px; }
+    .form-row .form-group.f-longo { flex: 0 0 240px; max-width: 240px; }
+    .form-row .form-group.f-xl    { flex: 0 1 280px; max-width: 280px; }
 
     /* Rótulo longo quebrando em duas linhas empurrava só aquele input para
        baixo; reservar a altura alinha a fileira inteira. */
@@ -524,13 +541,16 @@
 
     /* Cada bloco é um assunto: rastreamento, Wi-Fi, logs. Sem a separação, a
        aba virava uma parede de campos sem hierarquia. */
+    /* Bloco comum + *{margin:0} deixava .form-row e .btn-row colados um no
+       outro; o gap do .pane só separa filhos diretos dele. */
     .esp-sec   { border: 1px solid var(--border); border-radius: 10px;
-                 padding: 12px 14px; margin-top: 4px; background: rgba(255,255,255,0.015); }
+                 padding: 12px 14px; background: rgba(255,255,255,0.015);
+                 display: flex; flex-direction: column; gap: 12px; }
     .esp-sec-t { font-size: 13px; font-weight: 600; color: var(--text);
-                 margin-bottom: 10px; display: flex; align-items: baseline;
+                 display: flex; align-items: baseline;
                  gap: 10px; flex-wrap: wrap; }
     .esp-hint  { font-weight: 400; font-size: 11px; color: var(--text-dim); }
-    .esp-nota  { font-size: 11px; color: var(--text-dim); margin-top: 8px; line-height: 1.5; }
+    .esp-nota  { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
 
     /* Rótulos de tamanhos diferentes desalinhavam os campos: "DISTÂNCIA
        MÍNIMA (M)" quebra em duas linhas e empurrava só aquele input para
@@ -545,7 +565,10 @@
 
     @media (max-width: 768px) {
       /* Empilhado, largura fixa só deixaria os campos estreitos à toa. */
-      .f-curto, .f-medio, .f-longo, .f-xl { flex-basis: 100% !important; max-width: none !important; }
+      .form-row .form-group.f-curto,
+      .form-row .form-group.f-medio,
+      .form-row .form-group.f-longo,
+      .form-row .form-group.f-xl { flex: 1 1 100%; max-width: none; }
       .form-row .form-group label { min-height: 0; }
     }
     @media (max-width: 768px) {
@@ -703,7 +726,11 @@
       .field-table .f-name { width: auto; }
 
       .action-btn { width: 100%; text-align: center; padding: 11px 20px; }
-      .form-row { flex-direction: column; }
+      /* Em column o eixo cruzado é o horizontal: o align-items:flex-end da
+         regra base deixava cada campo fit-content e colado à direita, com
+         larguras diferentes. E o flex-basis:100% das classes vira ALTURA
+         aqui, então não corrigia nada. */
+      .form-row { flex-direction: column; align-items: stretch; }
 
       /* A barra de comando tem 7 itens somando ~695px de min-content. Sem
          quebra de linha, tudo depois de "Enviar" fica fora da tela e o
@@ -714,7 +741,7 @@
       .clear-btn { flex: 1 1 auto; padding: 10px 12px; font-size: 14px; }
 
       .pane { padding: 12px; gap: 10px; }
-      .grid-2, .grid-3 { grid-template-columns: 1fr !important; }
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
 
       /* ── Alvos de toque: mínimo de 44px ──────────────────── */
       .menu-toggle { min-width: 44px; min-height: 44px; }
@@ -731,9 +758,7 @@
          360px; em largura total eles respiram e o alvo cresce junto. */
       .btn-row > div[style*="display:flex"] { width: 100%; justify-content: space-between; }
 
-      /* max-width inline sobrevive ao empilhamento e deixa metade dos campos
-         estreitos ao lado de campos de largura total. */
-      .form-row .form-group { max-width: none !important; }
+
 
       /* ── Mapa no celular ─────────────────────────────────────
          Antes, três camadas (coordenadas, fonte dos dados e cinco botões)
@@ -803,8 +828,6 @@
       .tab { padding: 9px 12px; font-size: 13px; min-height: 44px; }
     }
 
-    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
   </style>
 </head>
 <body>
@@ -1370,7 +1393,7 @@
                 <option value="6">GPS + GLONASS + Galileo</option>
                 <option value="7">Todas</option>
               </select>
-              <button class="conn-btn connect" style="padding:3px 10px;font-size:11px;" onclick="applyGnssMode()">Aplicar</button>
+              <button class="conn-btn connect btn-mini" onclick="applyGnssMode()">Aplicar</button>
             </div>
 
             <div style="display:flex;align-items:center;gap:4px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;"
@@ -1382,7 +1405,7 @@
                 <option value="0,1">Parseado USB · NMEA UART (0,1)</option>
                 <option value="1,0">Parseado UART · NMEA USB (1,0)</option>
               </select>
-              <button class="conn-btn connect" style="padding:3px 10px;font-size:11px;" onclick="applyGnssPort()">Aplicar</button>
+              <button class="conn-btn connect btn-mini" onclick="applyGnssPort()">Aplicar</button>
             </div>
 
             <div style="display:flex;align-items:center;gap:4px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;">
@@ -1391,7 +1414,7 @@
                 <option value="1">1s</option><option value="2" selected>2s</option>
                 <option value="5">5s</option><option value="10">10s</option><option value="30">30s</option>
               </select>
-              <button class="conn-btn connect" style="padding:3px 10px;font-size:11px;" id="gnssPollBtn" onclick="toggleGnssPoll()">ON</button>
+              <button class="conn-btn connect btn-mini" id="gnssPollBtn" onclick="toggleGnssPoll()">ON</button>
             </div>
 
             <div style="margin-left:auto;display:flex;gap:6px;">

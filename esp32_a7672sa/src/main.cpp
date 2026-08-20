@@ -80,8 +80,14 @@ static const char* WIFI_PASS = WIFI_PASS_LOCAL;
 static const int MAPA_ZOOM = 16;
 
 // ── Log no monitor (Serial0 / USB) ───────────────────────────
-// true ecoa todo o tráfego AT. Verboso, mas é o que mostra onde a conversa
-// com o módulo trava — deixe ligado até a placa estar validada.
+// Fica MUDO até alguém falar com a placa. Em campo a serial costuma estar
+// desligada ou ligada a outro equipamento, e despejar log num barramento que
+// ninguém lê é ruído e tempo de CPU. O primeiro comando '@' vindo do app
+// liga o log; '@LOG 0' desliga de novo.
+static bool logAtivo = false;
+
+// Com o log ligado, ecoa também todo o tráfego AT — é o que mostra onde a
+// conversa com o módulo trava.
 static const bool DEBUG_AT = true;
 
 // Resumo periódico do estado. 0 desliga.
@@ -117,6 +123,7 @@ static void refreshNet(uint32_t maxAgeMs) {
 // saíram juntas ou com um minuto de intervalo — e é justamente o intervalo
 // que denuncia timeout de rede.
 static void logf(const char* fmt, ...) {
+  if (!logAtivo) return;
   char buf[256];
   va_list ap;
   va_start(ap, fmt);
@@ -203,6 +210,23 @@ static void comandoWifi(const String& cmd) {
   wifiReconectar = true;
 }
 
+//   @LOG?   estado do log
+//   @LOG 1  liga
+//   @LOG 0  desliga (volta ao silêncio de fábrica)
+static void comandoLog(const String& cmd) {
+  if (cmd == "@LOG?" || cmd == "@LOG") {
+    Serial.println(String("@LOG:") + (logAtivo ? "1 ligado" : "0 desligado"));
+    return;
+  }
+  int esp = cmd.indexOf(' ');
+  if (esp < 0) { Serial.println("@LOG:ERRO formato"); return; }
+  String v = cmd.substring(esp + 1); v.trim();
+  logAtivo = (v == "1" || v.equalsIgnoreCase("on"));
+  // O eco do tráfego AT acompanha o log; em ponte quem manda é a ponte.
+  if (!ponteAtiva) modem.setDebug(logAtivo && DEBUG_AT ? &Serial : nullptr);
+  Serial.println(String("@LOG:") + (logAtivo ? "1 ligado" : "0 desligado"));
+}
+
 // Configuração da unidade pelo cabo. Ver lib/Cfg/cfg.h para o porquê de nada
 // disto passar pelo Firebase.
 static void aplicarDisplay(bool on) {
@@ -275,6 +299,14 @@ static void pumpUsb() {
       String cmd = usbLinha;
       usbLinha = "";
       cmd.trim();
+      // Qualquer comando do app significa que há alguém do outro lado.
+      if (cmd.startsWith("@") && !logAtivo && cmd != "@LOG 0") {
+        logAtivo = true;
+        if (DEBUG_AT && !ponteAtiva) modem.setDebug(&Serial);
+        Serial.println("@LOG:1 ligado ao receber comando do app");
+      }
+
+      if (cmd.startsWith("@LOG")) { comandoLog(cmd); continue; }
       if (cmd == "@BRIDGE")      { entrarPonte(true);  continue; }
       if (cmd == "@NORMAL")      { entrarPonte(false); continue; }
       if (cmd == "@PING")        { Serial.println(ponteAtiva ? "@BRIDGE:ON" : "@BRIDGE:OFF"); continue; }
@@ -428,7 +460,7 @@ void setup() {
        APN, FB_DB_HOST, FB_DEVICE, (unsigned long)(FB_INTERVAL_MS / 1000));
 
   modem.begin(Serial2, PIN_RX, PIN_TX, 115200);
-  if (DEBUG_AT) modem.setDebug(&Serial);
+  if (DEBUG_AT && logAtivo) modem.setDebug(&Serial);
 
   modem.setStatusPin(PIN_STATUS);
 
