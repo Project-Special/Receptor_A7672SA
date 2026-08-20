@@ -251,13 +251,9 @@ bool A7672Firebase::fetchConfig() {
   String tz = jsonRaw(body, "tz");
   if (tz.length()) _tzMin = tz.toInt();
 
-  String dp = jsonRaw(body, "display");
-  if (dp.length()) {
-    bool novo = (dp == "true" || dp == "1");
-    // Só grava quando muda: a NVS tem ciclos de escrita contados e o config é
-    // lido a cada 30 s.
-    if (novo != _display) { _display = novo; displaySalvar(novo); }
-  }
+  // 'display' não vem daqui de propósito: é característica da unidade, não
+  // preferência de operação. Configura-se na bancada, pelo cabo (@DISP), junto
+  // com o Wi-Fi — ver comandoDisplay() no main.
 
   return true;
 }

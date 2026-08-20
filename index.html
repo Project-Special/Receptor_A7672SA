@@ -1812,14 +1812,6 @@
                   <option value="0">Só a última posição</option>
                 </select>
               </div>
-              <div class="form-group" style="max-width:190px;">
-                <label>Display</label>
-                <select id="fbRemoteDisplay"
-                        title="Padrão desligado. Sem display o firmware não inicializa o SPI, não monta o estado da tela e não baixa tiles do mapa — nada disso consome tempo do ESP32.">
-                  <option value="0" selected>Sem tela (padrão)</option>
-                  <option value="1">Com tela acoplada</option>
-                </select>
-              </div>
               <div class="form-group" style="max-width:210px;">
                 <label>Fuso horário</label>
                 <select id="fbRemoteTz"
@@ -1837,6 +1829,12 @@
               <button class="action-btn secondary" onclick="fbRemoteEnable(false)">⏹️ Desativar envio</button>
               <button class="action-btn" onclick="fbRemoteApplyParams()">💾 Aplicar parâmetros</button>
               <button class="action-btn secondary" onclick="fbRemoteLoadConfig()">📥 Ler do device</button>
+            </div>
+            <div class="esp-nota">
+              Toda a configuração vai pelo <b>cabo USB</b> e fica na memória do ESP32 —
+              exige <b>Interface → ESP32 (ponte USB)</b>. O Firebase recebe só os dados
+              (posições, status e logs), então o aparelho em campo não gasta a franquia
+              do chip perguntando se algo mudou.
             </div>
           </div>
 
@@ -4899,222 +4897,67 @@ function fbrNum(id, min, max, padrao) {
   return isNaN(v) ? padrao : Math.min(max, Math.max(min, v));
 }
 
-// PATCH, nao PUT: o PUT substitui o no inteiro, entao ativar o envio apagaria
-// os parametros ja configurados (e um firmware mais novo perderia campos que
-// esta versao do app nem conhece).
-async function fbrPatchConfig(campos) {
-  const c = firebaseCfg();
-  if (!c.host || !c.key) { alert('Preencha o host do banco e a Web API Key.'); return false; }
-  await fbWrite(`/devices/${encodeURIComponent(fbRemoteDevice())}/config.json`, campos, 'PATCH');
-  return true;
+// ── Configuracao da unidade: tudo pelo cabo ───────────────────
+// Nada disto passa pelo Firebase. Sao escolhas de montagem e operacao do
+// aparelho; mandá-las pela nuvem custava uma requisicao HTTPS a cada 30 s no
+// chip IoT so para descobrir que nada mudou, e punha a configuracao de campo
+// na dependencia de haver rede. O banco continua recebendo so os DADOS.
+async function espCfgEnviar(campos) {
+  if (!espSerialPronta()) return null;
+  const resp = waitFor(l => l.startsWith('@CFG:'), 8000);
+  await writeRaw('@CFG ' + JSON.stringify(campos) + '\r\n');
+  const r = await resp;
+  if (!r) { fbrLog('ESP32 nao respondeu ao @CFG.', 'err'); return null; }
+  if (r.includes('ERRO')) { fbrLog(`ESP32: ${r}`, 'err'); return null; }
+  try { return JSON.parse(r.slice(5)); } catch (_) { return null; }
+}
+
+function espCfgParaTela(c) {
+  if (!c) return;
+  document.getElementById('fbRemoteInterval').value    = c.intervalo;
+  document.getElementById('fbRemoteMinDist').value     = c.distMin;
+  document.getElementById('fbRemoteStatusEvery').value = c.statusCada;
+  document.getElementById('fbRemoteTrack').value       = c.historico ? '1' : '0';
+  document.getElementById('fbRemoteTz').value          = String(c.tz);
+  document.getElementById('fbRemoteDisplay').value     = c.display ? '1' : '0';
+  const b = document.getElementById('fbRemoteOnBtn');
+  if (b) b.textContent = c.enviar ? '⏹️ Parar envio' : '▶️ Ativar envio';
+  setText('fbr-enabled', c.enviar ? 'ATIVO' : 'parado');
+}
+
+// Le a configuracao gravada no proprio ESP32.
+async function fbRemoteLoadConfig() {
+  if (!espSerialPronta()) return;
+  const resp = waitFor(l => l.startsWith('@CFG:'), 6000);
+  await writeRaw('@CFG?\r\n');
+  const r = await resp;
+  if (!r) { fbrLog('ESP32 nao respondeu.', 'err'); return; }
+  try {
+    const c = JSON.parse(r.slice(5));
+    espCfgParaTela(c);
+    fbrLog(`Config lida do ESP32: ${JSON.stringify(c)}`, 'ok');
+  } catch (e) { fbrLog(`Resposta invalida: ${r}`, 'err'); }
 }
 
 async function fbRemoteEnable(on) {
-  try {
-    if (!await fbrPatchConfig({ enabled: !!on })) return;
-    fbLog(`Comando enviado: ${fbRemoteDevice()} -> envio ${on ? 'ATIVADO' : 'DESATIVADO'}.`, 'ok');
-    // O device so obedece no proximo poll dele; dizer isso evita a leitura de
-    // que o comando falhou quando o status ainda mostra o valor antigo.
-    fbrLog(`>> comando: envio ${on ? 'ATIVADO' : 'DESATIVADO'} — o ESP32 aplica no proximo ciclo (ate ~30 s)`, 'warn');
-    setTimeout(fbRemoteRefresh, 1500);
-  } catch (e) {
-    fbLog(`Falha ao enviar comando: ${e.message}`, 'err');
-  }
-}
-
-// ── Wi-Fi do ESP32: pelo cabo, nunca pelo banco ───────────────
-// A senha vai do navegador direto para a NVS do device, pela serial. Nao passa
-// pelo Firebase (cuja Web API Key e publica) nem fica no localStorage.
-function espSerialPronta() {
-  if (!connected || getConnMode() !== 'esp32') {
-    alert('Conecte primeiro em Interface → "ESP32 (ponte USB)".\n\n'
-        + 'A senha do Wi-Fi vai pelo cabo, direto para o ESP32 — '
-        + 'de propósito, para não passar pelo Firebase.');
-    return false;
-  }
-  return true;
-}
-
-// Escapa o que quebraria o JSON da linha @WIFI. Aspas e barra são o caso
-// comum; os caracteres de controle entram porque o firmware lê linha a linha —
-// um \n colado no campo cortaria o comando ao meio, em silêncio.
-function espJsonStr(s) {
-  return String(s)
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/[\x00-\x1f]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
-}
-
-async function espWifiMudar() {
-  if (!espSerialPronta()) return;
-  const ssid = (document.getElementById('fbWifiSsid').value || '').trim();
-  const pass = document.getElementById('fbWifiPass').value || '';
-  if (!ssid) { alert('Informe o nome da rede.'); return; }
-
-  const resp = waitFor(l => l.startsWith('@WIFI:'), 20000);
-  await writeRaw(`@WIFI {"ssid":"${espJsonStr(ssid)}","pass":"${espJsonStr(pass)}"}\r\n`);
-  document.getElementById('fbWifiPass').value = '';   // não deixa a senha na tela
-
-  const r = await resp;
-  if (!r) { fbrLog('ESP32 nao respondeu ao @WIFI.', 'err'); return; }
-  if (r.includes('SALVO') || r.includes('OK')) espWifiEmUso = ssid;
-  if (r.includes('OK'))        fbrLog(`Wi-Fi trocado para "${ssid}" — ${r.replace('@WIFI:OK', 'IP')}`, 'ok');
-  else if (r.includes('FALHA')) fbrLog(`Rede "${ssid}" gravada, mas nao conectou. Confira a senha.`, 'warn');
-  else                          fbrLog(`ESP32: ${r}`, 'err');
-}
-
-// Rede que o ESP32 está usando agora, para marcá-la na lista. Preenchida
-// pelo @WIFI? e pela resposta do @WIFI.
-let espWifiEmUso = '';
-
-// Varre as redes pelo próprio ESP32 — é o rádio dele que importa, não o do
-// PC: a rede que aparece forte aqui pode não alcançar onde o aparelho fica.
-async function espWifiScan() {
-  if (!espSerialPronta()) return;
-  const btn = document.getElementById('espScanBtn');
-  const caixa = document.getElementById('espRedes');
-  const antes = btn.textContent;
-  btn.textContent = '📡 buscando...';
-  btn.disabled = true;
-  caixa.innerHTML = '';
-
-  const redes = [];
-  // O firmware emite uma linha por rede e fecha com '@SCAN:FIM <n>'. O waiter
-  // vê todas as linhas, então acumula no caminho e só resolve no fechamento.
-  const parar = waitFor(l => {
-    const t = l.trim();
-    if (t.startsWith('@SCAN:NET ')) {
-      try { redes.push(JSON.parse(t.slice(10))); } catch (_) {}
-    }
-    return t.startsWith('@SCAN:FIM') || t.startsWith('@SCAN:JA_RODANDO');
-  }, 25000);
-
-  await writeRaw('@SCAN\r\n');
-  const fim = await parar;
-  btn.textContent = antes;
-  btn.disabled = false;
-
-  if (!fim) { fbrLog('ESP32 nao respondeu a varredura.', 'err'); return; }
-  if (fim.includes('JA_RODANDO')) { fbrLog('Varredura ja em andamento — tente de novo em alguns segundos.', 'warn'); return; }
-  if (!redes.length) { fbrLog('Nenhuma rede encontrada pelo ESP32.', 'warn'); return; }
-
-  // Mais forte primeiro, sem repetir SSID (roteador mesh aparece várias vezes).
-  redes.sort((a, b) => b.rssi - a.rssi);
-  const vistos = new Set();
-  const lista = redes.filter(r => r.ssid && !vistos.has(r.ssid) && vistos.add(r.ssid));
-
-  const atual = (document.getElementById('fbWifiSsid').value || '').trim();
-  const emUso = espWifiEmUso;   // a que o ESP32 está usando agora, se souber
-  const dl = document.getElementById('fbWifiRedes');
-  dl.innerHTML = lista.map(r => `<option value="${r.ssid.replace(/"/g, '&quot;')}"></option>`).join('');
-
-  const titulo = document.createElement('div');
-  titulo.className = 'esp-redes-t';
-  titulo.textContent = `Selecione a rede que o ESP32 vai usar (${lista.length} encontradas):`;
-  caixa.appendChild(titulo);
-
-  const linhas = document.createElement('div');
-  linhas.className = 'esp-redes';
-  caixa.appendChild(linhas);
-
-  for (const r of lista) {
-    const el = document.createElement('div');
-    el.className = 'esp-rede' + (r.ssid === atual ? ' atual' : '');
-    el.title = `${r.rssi} dBm${r.aberta ? ' · rede aberta' : ''}`;
-    const barras = r.rssi >= -55 ? '▂▄▆█' : r.rssi >= -67 ? '▂▄▆' : r.rssi >= -78 ? '▂▄' : '▂';
-    el.innerHTML = `<span class="mark"></span>`
-                 + `<span class="cadeado">${r.aberta ? '🔓' : '🔒'}</span>`
-                 + `<span class="nome">${r.ssid.replace(/</g, '&lt;')}</span>`
-                 + (r.ssid === emUso ? `<span class="usada">em uso</span>` : '')
-                 + `<span class="rssi">${barras} ${r.rssi} dBm</span>`;
-    el.onclick = () => {
-      document.getElementById('fbWifiSsid').value = r.ssid;
-      linhas.querySelectorAll('.esp-rede').forEach(x => x.classList.remove('atual'));
-      el.classList.add('atual');
-      // Rede aberta não tem senha: mandar direto para o botão poupa o passo.
-      document.getElementById('fbWifiPass').value = '';
-      document.getElementById(r.aberta ? 'fbWifiSsid' : 'fbWifiPass').focus();
-      fbrLog(`Rede "${r.ssid}" selecionada${r.aberta ? ' (aberta)' : ''}. `
-           + 'Preencha a senha e use "Mudar Wi-Fi".', 'ok');
-    };
-    linhas.appendChild(el);
-  }
-  fbrLog(`${lista.length} rede(s) encontrada(s) pelo ESP32.`, 'ok');
-}
-
-async function espWifiConsultar() {
-  if (!espSerialPronta()) return;
-  const resp = waitFor(l => l.startsWith('@WIFI:'), 6000);
-  await writeRaw('@WIFI?\r\n');
-  const r = await resp;
-  if (!r) { fbrLog('ESP32 nao respondeu.', 'err'); return; }
-
-  // '@WIFI:SSID <nome> CONECTADO <ip>' — guarda o nome para marcar na lista.
-  const m = r.match(/@WIFI:SSID\s+(.*?)\s+(?:CONECTADO|DESCONECTADO)/);
-  if (m) {
-    espWifiEmUso = m[1];
-    document.querySelectorAll('#espRedes .esp-rede').forEach(el => {
-      const nome = el.querySelector('.nome')?.textContent;
-      if (nome === espWifiEmUso && !el.querySelector('.usada')) {
-        const tag = document.createElement('span');
-        tag.className = 'usada'; tag.textContent = 'em uso';
-        el.insertBefore(tag, el.querySelector('.rssi'));
-      }
-    });
-  }
-  fbrLog(`Rede no ESP32: ${r.replace('@WIFI:', '')}`, 'ok');
-}
-
-async function espWifiApagar() {
-  if (!espSerialPronta()) return;
-  if (!confirm('Apagar a rede Wi-Fi salva no ESP32?\n\n'
-             + 'Ele volta a usar a rede do secrets.h, se houver, e o mapa passa a '
-             + 'funcionar só com os tiles já baixados.')) return;
-  const resp = waitFor(l => l.startsWith('@WIFI:'), 8000);
-  await writeRaw('@WIFI!\r\n');
-  const r = await resp;
-  fbrLog(r ? `ESP32: ${r.replace('@WIFI:', '')}` : 'ESP32 nao respondeu.', 'warn');
+  const c = await espCfgEnviar({ enviar: !!on });
+  if (!c) return;
+  espCfgParaTela(c);
+  fbrLog(`Envio ${c.enviar ? 'ATIVADO' : 'DESATIVADO'} no ESP32.`, 'ok');
 }
 
 async function fbRemoteApplyParams() {
-  const p = {
-    interval:    fbrNum('fbRemoteInterval', 5, 3600, 30),
-    minDist:     fbrNum('fbRemoteMinDist', 0, 10000, 0),
-    statusEvery: fbrNum('fbRemoteStatusEvery', 10, 3600, 60),
-    track:       document.getElementById('fbRemoteTrack').value === '1',
-    tz:          parseInt(document.getElementById('fbRemoteTz').value, 10) || 0,
-    display:     document.getElementById('fbRemoteDisplay').value === '1',
-  };
-  try {
-    if (!await fbrPatchConfig(p)) return;
-    fbLog(`Parâmetros gravados em ${fbRemoteDevice()}: ${JSON.stringify(p)}`, 'ok');
-    fbrLog(`>> parametros: publicar a cada ${p.interval}s, distancia minima ${p.minDist} m, `
-         + `heartbeat ${p.statusEvery}s, historico ${p.track ? 'on' : 'off'}, `
-         + `fuso UTC${p.tz/60 >= 0 ? '+' : ''}${p.tz/60}, display ${p.display ? 'on' : 'off'} `
-         + '— valem no proximo ciclo', 'warn');
-    setTimeout(fbRemoteRefresh, 1500);
-  } catch (e) {
-    fbLog(`Falha ao gravar parâmetros: ${e.message}`, 'err');
-  }
-}
-
-// Traz para a tela o que esta gravado no banco, para nao editar por cima de
-// valores que outra pessoa (ou outro navegador) ja mudou.
-async function fbRemoteLoadConfig() {
-  const dev = fbRemoteDevice();
-  try {
-    const cfg = await fbGet(`/devices/${encodeURIComponent(dev)}/config.json`);
-    if (!cfg) { fbrLog(`(${dev} ainda nao tem config gravado)`, 'warn'); return; }
-    if (cfg.interval    !== undefined) document.getElementById('fbRemoteInterval').value = cfg.interval;
-    if (cfg.minDist     !== undefined) document.getElementById('fbRemoteMinDist').value = cfg.minDist;
-    if (cfg.statusEvery !== undefined) document.getElementById('fbRemoteStatusEvery').value = cfg.statusEvery;
-    if (cfg.track       !== undefined) document.getElementById('fbRemoteTrack').value = cfg.track ? '1' : '0';
-    if (cfg.tz          !== undefined) document.getElementById('fbRemoteTz').value = String(cfg.tz);
-    if (cfg.display     !== undefined) document.getElementById('fbRemoteDisplay').value = cfg.display ? '1' : '0';
-    fbrLog(`config lido de ${dev}: ${JSON.stringify(cfg)}`, 'ok');
-  } catch (e) {
-    fbrLog(`falha ao ler config: ${e.message}`, 'err');
-  }
+  const c = await espCfgEnviar({
+    intervalo:  fbrNum('fbRemoteInterval', 5, 3600, 30),
+    distMin:    fbrNum('fbRemoteMinDist', 0, 10000, 0),
+    statusCada: fbrNum('fbRemoteStatusEvery', 10, 3600, 60),
+    historico:  document.getElementById('fbRemoteTrack').value === '1',
+    tz:         parseInt(document.getElementById('fbRemoteTz').value, 10) || 0,
+    display:    document.getElementById('fbRemoteDisplay').value === '1',
+  });
+  if (!c) return;
+  espCfgParaTela(c);
+  fbrLog(`Config gravada no ESP32: ${JSON.stringify(c)}`, 'ok');
 }
 
 function fbrAge(iso) {
@@ -5829,9 +5672,13 @@ function showTab(name, el) {
   // Abrir a aba já traz o estado: obrigar a clicar em "Atualizar" para ver se
   // o device está vivo é trabalho que a tela pode fazer sozinha.
   if (name === 'esp32') {
+    // Status e logs vem do banco (sao dados). A configuracao vem do cabo, e
+    // so faz sentido buscar se ele estiver ligado — abrir a aba sem cabo nao
+    // deve disparar alerta nenhum.
     const c = firebaseCfg();
-    if (c.host && c.key) { fbRemoteRefresh(); fbRemoteLoadConfig(); }
-    else fbrLog('Preencha host e Web API Key na aba Firebase primeiro.', 'warn');
+    if (c.host && c.key) fbRemoteRefresh();
+    if (connected && getConnMode() === 'esp32') fbRemoteLoadConfig();
+    else fbrLog('Conecte em "ESP32 (ponte USB)" para ler e mudar a configuracao.', 'warn');
   }
 
   if (name === 'map') {

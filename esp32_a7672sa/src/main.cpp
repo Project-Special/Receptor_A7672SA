@@ -13,6 +13,7 @@
 #include <display.h>
 #include <ui.h>
 #include <osm.h>
+#include <cfg.h>
 
 // ── Pinos ────────────────────────────────────────────────────
 // UART2 do ESP32 ligada à UART principal do módulo (115200 8N1).
@@ -133,9 +134,8 @@ static void logf(const char* fmt, ...) {
 // dois mestres na mesma UART fazem as respostas se cruzarem.
 static bool ponteAtiva = false;
 
-// Há tela acoplada nesta unidade? Vem da NVS no boot e do /config depois.
-// Declarado aqui em cima porque entrarPonte(), logo abaixo, já consulta.
-static bool displayAtivo = true;
+// Espelho de cfg.display, para entrarPonte() logo abaixo já poder consultar.
+static bool displayAtivo = false;
 static String usbLinha;
 
 static void entrarPonte(bool on) {
@@ -203,6 +203,38 @@ static void comandoWifi(const String& cmd) {
   wifiReconectar = true;
 }
 
+// Configuração da unidade pelo cabo. Ver lib/Cfg/cfg.h para o porquê de nada
+// disto passar pelo Firebase.
+static void aplicarDisplay(bool on) {
+  if (on == displayAtivo) return;
+  displayAtivo = on;
+  logf("Display %s.", on ? "ATIVADO" : "DESATIVADO");
+  if (on) {
+    ui.begin();
+    mapa.begin();
+    ui.forcarRedesenho();
+  } else {
+    // Só parar de desenhar deixaria a última tela acesa para sempre.
+    tft.fillScreen(0x0000);
+    pinMode(TFT_BL, OUTPUT);
+    digitalWrite(TFT_BL, LOW);
+  }
+}
+
+static void comandoCfg(const String& cmd) {
+  if (cmd == "@CFG?" || cmd == "@CFG") { Serial.println("@CFG:" + cfg.paraJson()); return; }
+
+  int chave = cmd.indexOf('{');
+  if (chave < 0) { Serial.println("@CFG:ERRO formato"); return; }
+
+  bool displayAntes = cfg.display;
+  bool mudou = cfg.aplicarJson(cmd.substring(chave));
+
+  if (cfg.display != displayAntes) aplicarDisplay(cfg.display);
+  if (mudou) logf("Config trocada pelo app: %s", cfg.paraJson().c_str());
+  Serial.println("@CFG:" + cfg.paraJson());
+}
+
 // Varredura de redes, disparada pelo app. Assíncrona de propósito: o
 // scanNetworks() bloqueante segura o loop por 2 a 4 s, que foi exatamente o
 // que congelava o display na versão anterior do @WIFI.
@@ -248,6 +280,7 @@ static void pumpUsb() {
       if (cmd == "@PING")        { Serial.println(ponteAtiva ? "@BRIDGE:ON" : "@BRIDGE:OFF"); continue; }
       if (cmd.startsWith("@WIFI")) { comandoWifi(cmd); continue; }
       if (cmd == "@SCAN")          { comandoScan();    continue; }
+      if (cmd.startsWith("@CFG"))  { comandoCfg(cmd);  continue; }
       if (ponteAtiva && cmd.length()) modem.write(cmd + "\r\n");
       continue;
     }
@@ -351,7 +384,7 @@ static void printStatus() {
     logf("STATUS | rede: %s %s %d dBm IP %s | GNSS: %s | envio %s | Firebase: %lu env, %lu falhas",
          netCache.operatorName.c_str(), netCache.tech.c_str(), netCache.dbm,
          netCache.ip.length() ? netCache.ip.c_str() : "sem IP",
-         gnssTxt.c_str(), firebase.enabled() ? "ATIVO" : "parado",
+         gnssTxt.c_str(), cfg.enviar ? "ATIVO" : "parado",
          (unsigned long)fbEnviados, (unsigned long)fbFalhas);
   } else {
     logf("STATUS | SIM: %s | GNSS: %s", A7672Core::simText(modem.sim()), gnssTxt.c_str());
@@ -368,7 +401,9 @@ void setup() {
   // não existe custaria SPI, cache de mapa e tempo de loop à toa. Quem tem
   // display ativa uma vez pelo app e a NVS lembra — a decisão precisa estar
   // tomada antes de haver rede para ler o banco.
-  displayAtivo = A7672Firebase::displaySalvo(false);
+  cfg.carregar();
+  displayAtivo = cfg.display;
+  logf("Config da unidade: %s", cfg.paraJson().c_str());
 
   if (displayAtivo) {
     ui.begin();
@@ -480,29 +515,25 @@ void setup() {
   // ── Firebase ───────────────────────────────────────────────
   logf("Autenticando no Firebase...");
   firebase.begin(FB_API_KEY, FB_DB_HOST, FB_DEVICE);
-  firebase.setTrackEnabled(FB_TRACK);   // o /config do app pode sobrescrever
+  firebase.setTrackEnabled(cfg.historico);
+  firebase.setTzMinutes(cfg.tzMin);
   if (firebase.ensureAuth()) {
     logf("Firebase: autenticado (usuario anonimo).");
 
     // O rastreamento nasce desligado: quem manda ligar é o app, escrevendo em
     // /devices/<id>/config. Sem isso o device gastaria dados sem ninguem pedir.
-    if (firebase.fetchConfig())
-      logf("Config lido: envio %s.", firebase.enabled() ? "ATIVADO pelo app" : "DESATIVADO");
-    else
-      logf("Config nao lido (%s) — envio segue desativado.", firebase.lastError().c_str());
-
     firebase.remoteLog("info", String("Boot. Rede ") + st.tech + " " + String(st.dbm) + " dBm, IP " + st.ip);
   } else {
     logf("Firebase FALHOU: %s", firebase.lastError().c_str());
   }
 
   logf("=== inicializacao concluida ===");
-  logf("Envio %s. Use o botao 'Ativar envio' na aba Firebase do app para mudar.",
-       firebase.enabled() ? "ATIVO" : "PARADO (aguardando comando do app)");
+  logf("Envio %s. Configure pela aba ESP32 do app, com o cabo ligado.",
+       cfg.enviar ? "ATIVO" : "PARADO");
   logf("Ponte: mande '@BRIDGE' por esta serial para falar AT com o modulo "
        "atraves do ESP32, e '@NORMAL' para devolver o controle ao firmware.");
-  logf("Wi-Fi: '@WIFI?' mostra a rede, '@WIFI {\"ssid\":\"..\",\"pass\":\"..\"}' troca, "
-       "'@WIFI!' apaga, '@SCAN' lista as redes. A senha nunca passa pelo Firebase.");
+  logf("Config: '@CFG?' mostra, '@CFG {\"enviar\":true,..}' aplica. Wi-Fi: '@WIFI?', "
+       "'@WIFI {..}', '@WIFI!', '@SCAN'. Nada disso passa pelo Firebase.");
 }
 
 void loop() {
@@ -536,47 +567,11 @@ void loop() {
     printFix(gnss.fix());
   }
 
-  // ── Ordens vindas do app ────────────────────────────────────
-  // Continua consultando mesmo desativado: é assim que o device fica sabendo
-  // que foi religado.
-  static uint32_t lastConfig = 0;
-  if (firebase.authenticated() && millis() - lastConfig > FB_CONFIG_POLL_MS) {
-    lastConfig = millis();
-    bool antes = firebase.enabled();
-    if (!firebase.fetchConfig()) {
-      // Silenciar aqui esconde o motivo de o device ignorar o botão do app.
-      logf("Config: falha ao ler — %s", firebase.lastError().c_str());
-    } else if (firebase.enabled() != antes) {
-      logf("COMANDO do app: envio %s.", firebase.enabled() ? "ATIVADO" : "DESATIVADO");
-      firebase.remoteLog("info", firebase.enabled() ? "Envio ativado pelo app"
-                                                    : "Envio desativado pelo app");
-    }
-
-    // Display ligado/desligado pelo app, sem precisar reiniciar.
-    if (firebase.displayLigado() != displayAtivo) {
-      displayAtivo = firebase.displayLigado();
-      logf("COMANDO do app: display %s.", displayAtivo ? "ATIVADO" : "DESATIVADO");
-      firebase.remoteLog("info", displayAtivo ? "Display ativado" : "Display desativado");
-      if (displayAtivo) {
-        ui.begin();
-        mapa.begin();
-        ui.forcarRedesenho();
-      } else {
-        // Só parar de desenhar deixaria a última tela acesa para sempre.
-        tft.fillScreen(0x0000);
-        pinMode(TFT_BL, OUTPUT);
-        digitalWrite(TFT_BL, LOW);
-      }
-    }
-  }
-
   // ── Envio periódico ─────────────────────────────────────────
   // Só sobe com fix válido: mandar 0,0 sujaria o histórico com pontos no golfo
   // da Guiné. E só com autorização do app.
-  uint32_t intervalo = firebase.remoteInterval() ? firebase.remoteInterval() * 1000UL
-                                                 : FB_INTERVAL_MS;
   static uint32_t lastSend = 0;
-  if (firebase.enabled() && millis() - lastSend > intervalo) {
+  if (cfg.enviar && millis() - lastSend > cfg.intervalo * 1000UL) {
     lastSend = millis();
     const GnssFix& f = gnss.fix();
     if (!f.valid) {
@@ -599,8 +594,7 @@ void loop() {
   }
 
   // ── Heartbeat ───────────────────────────────────────────────
-  uint32_t statusMs = firebase.statusEvery() ? firebase.statusEvery() * 1000UL
-                                             : FB_STATUS_PUSH_MS;
+  uint32_t statusMs = cfg.statusCada * 1000UL;
   static uint32_t lastPush = 0;
   if (firebase.authenticated() && millis() - lastPush > statusMs) {
     lastPush = millis();
@@ -629,10 +623,10 @@ void loop() {
     e.kmh = f.speedKmh; e.hdop = f.hdop; e.sats = f.svTotal;
     // Hora local na tela: quem olha o aparelho quer saber que horas são aqui,
     // não em Greenwich. O que sobe para o banco continua em UTC.
-    e.utc = A7672Firebase::localTimestamp(f.utcDate, f.utcTime, firebase.tzMinutes());
+    e.utc = A7672Firebase::localTimestamp(f.utcDate, f.utcTime, cfg.tzMin);
     e.operadora = netCache.operatorName; e.tech = netCache.tech;
     e.dbm = netCache.dbm; e.online = netCache.ip.length() > 0;
-    e.envioAtivo = firebase.enabled();
+    e.envioAtivo = cfg.enviar;
     e.enviados = fbEnviados; e.falhas = fbFalhas;
     e.wifi = (WiFi.status() == WL_CONNECTED);
     e.tilesCache = mapa.tilesEmCache();

@@ -101,9 +101,10 @@ public:
 
   // Tem display acoplado? Desligado por padrão: a maioria das unidades não
   // leva tela, e ligar o que não existe custaria SPI, cache de mapa e tempo
-  // de loop à toa. A preferência fica na NVS porque o boot precisa dela antes
-  // de haver rede para ler o banco.
-  bool displayLigado() const { return _display; }
+  // de loop à toa.
+  //
+  // Fica só na NVS, gravado pelo cabo (@DISP): é característica de montagem,
+  // não preferência de operação, e o boot precisa saber antes de haver rede.
   static bool displaySalvo(bool padrao = false);
   static void displaySalvar(bool on);
 
@@ -134,7 +135,6 @@ private:
   uint32_t _statusEvery = 0;
   float _minDist = 0;             // metros; 0 = envia todo ciclo
   int _tzMin = -180;              // Brasília por padrão
-  bool _display = false;
   double _lastLat = 0, _lastLon = 0;
   bool _temUltimo = false;
 };

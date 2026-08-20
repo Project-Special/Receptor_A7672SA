@@ -3,58 +3,68 @@
     "devices": {
       "$device": {
         ".write": "auth != null",
-
         "last": {
           ".read": "auth != null",
           ".validate": "newData.hasChildren(['lat','lon'])",
-          "lat": { ".validate": "newData.isNumber() && newData.val() >= -90  && newData.val() <= 90" },
-          "lon": { ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180" },
-          "utc": { ".validate": "newData.isString()" },
-          "$outro": { ".validate": "newData.isNumber() || newData.isString()" }
+          "lat": {
+            ".validate": "newData.isNumber() && newData.val() >= -90  && newData.val() <= 90"
+          },
+          "lon": {
+            ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180"
+          },
+          "utc": {
+            ".validate": "newData.isString()"
+          },
+          "$outro": {
+            ".validate": "newData.isNumber() || newData.isString()"
+          }
         },
-
         "track": {
           ".read": "auth != null",
           "$day": {
             "$entry": {
               ".validate": "newData.hasChildren(['lat','lon'])",
-              "lat": { ".validate": "newData.isNumber() && newData.val() >= -90  && newData.val() <= 90" },
-              "lon": { ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180" },
-              "utc": { ".validate": "newData.isString()" },
-              "$outro": { ".validate": "newData.isNumber() || newData.isString()" }
+              "lat": {
+                ".validate": "newData.isNumber() && newData.val() >= -90  && newData.val() <= 90"
+              },
+              "lon": {
+                ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180"
+              },
+              "utc": {
+                ".validate": "newData.isString()"
+              },
+              "$outro": {
+                ".validate": "newData.isNumber() || newData.isString()"
+              }
             }
           }
         },
-
-        "config": {
-          ".read": "auth != null",
-          "enabled":     { ".validate": "newData.isBoolean()" },
-          "track":       { ".validate": "newData.isBoolean()" },
-          "interval":    { ".validate": "newData.isNumber() && newData.val() >= 5 && newData.val() <= 3600" },
-          "statusEvery": { ".validate": "newData.isNumber() && newData.val() >= 10 && newData.val() <= 3600" },
-          "minDist":     { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10000" },
-          "tz":          { ".validate": "newData.isNumber() && newData.val() >= -720 && newData.val() <= 840" },
-          "display":     { ".validate": "newData.isBoolean()" },
-          "$outro":      { ".validate": "newData.isNumber() || newData.isString() || newData.isBoolean()" }
-        },
-
         "status": {
           ".read": "auth != null",
-          "$campo": { ".validate": "newData.isNumber() || newData.isString() || newData.isBoolean()" }
+          "$campo": {
+            ".validate": "newData.isNumber() || newData.isString() || newData.isBoolean()"
+          }
         },
-
         "logs": {
           ".read": "auth != null",
           "$entry": {
             ".validate": "newData.hasChildren(['lvl','msg'])",
-            "lvl": { ".validate": "newData.isString() && newData.val().length <= 8" },
-            "msg": { ".validate": "newData.isString() && newData.val().length <= 200" },
-            "up":  { ".validate": "newData.isNumber()" }
+            "lvl": {
+              ".validate": "newData.isString() && newData.val().length <= 8"
+            },
+            "msg": {
+              ".validate": "newData.isString() && newData.val().length <= 200"
+            },
+            "up": {
+              ".validate": "newData.isNumber()"
+            }
           }
         },
-
         "//": "Não existe nó 'wifi' aqui de propósito. A senha da rede vai do app para o device pelo cabo USB (comando @WIFI na serial) e fica só na NVS. Guardá-la no banco a exporia a quem tivesse a Web API Key — que é pública, por ir no app.",
-        "wifi": { ".validate": false }
+        "wifi": {
+          ".validate": false
+        },
+        "//config": "Nao existe no de config: toda a configuracao da unidade (envio, intervalo, distancia minima, heartbeat, historico, fuso, display, Wi-Fi) vai pelo cabo USB e fica na NVS do ESP32. O banco recebe so os dados."
       }
     }
   }
