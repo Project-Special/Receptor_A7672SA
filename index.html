@@ -225,6 +225,23 @@
     /* No desktop o agrupador não deve existir para o layout: os filhos seguem
        posicionados sobre o mapa, exatamente como antes. */
     #map-overlays { display: contents; }
+
+    /* As duas barras dividem a faixa de cima: fonte/dia à esquerda (depois dos
+       controles de zoom do Leaflet, que ficam no canto) e leitura à direita.
+       Sem teto de largura elas se sobrepõem quando o modo Firebase acrescenta
+       os seletores de device e dia. */
+    #map-source-bar { max-width: calc(55% - 58px); }
+    #map-infobar    { max-width: 35%; overflow: hidden; }
+    #map-infobar span { overflow: hidden; text-overflow: ellipsis; }
+
+    /* Mapa estreito não comporta as duas: a leitura sai, porque os mesmos
+       números estão nos cards da aba GNSS. */
+    @media (max-width: 1000px) {
+      #map-infobar { display: none; }
+      /* 58 do zoom + 12 de folga em cada borda: sem os 12 finais a barra
+         terminava passando da borda direita do mapa. */
+      #map-source-bar { max-width: calc(100% - 82px); }
+    }
     #mapMenuBtn, #map-menu-backdrop { display: none; }
 
     /* TERMINAL */
@@ -1557,9 +1574,10 @@
                blocos abaixo mantêm o posicionamento original na tela grande. -->
           <div id="map-overlays">
           <div id="map-infobar" style="
-            position:absolute;top:10px;left:50%;transform:translateX(-50%);
+            position:absolute;top:8px;right:12px;
             z-index:1000;background:rgba(22,27,34,0.92);border:1px solid var(--border);
-            border-radius:8px;padding:6px 16px;display:flex;gap:16px;align-items:center;
+            border-radius:8px;padding:6px 14px;display:flex;gap:16px;align-items:center;
+            min-height:34px;box-sizing:border-box;
             font-size:12px;pointer-events:none;backdrop-filter:blur(4px);white-space:nowrap;">
             <span id="map-coord" style="color:var(--text);">Aguardando coordenadas...</span>
             <span id="map-spd" style="color:var(--text-dim);"></span>
@@ -1571,9 +1589,10 @@
                gravado no Firebase. São camadas separadas para que carregar um
                dia antigo não contamine o rastro ao vivo. -->
           <div id="map-source-bar" style="
-            position:absolute;top:56px;left:12px;z-index:1000;display:flex;gap:6px;
+            position:absolute;top:8px;left:58px;z-index:1000;display:flex;gap:6px;
             align-items:center;flex-wrap:wrap;background:rgba(22,27,34,0.92);
             border:1px solid var(--border);border-radius:8px;padding:6px 8px;
+            min-height:34px;box-sizing:border-box;
             backdrop-filter:blur(4px);font-size:12px;">
             <select id="mapSource" onchange="mapSourceChange()"
                     style="background:var(--bg-input,#0d1117);color:var(--text);
