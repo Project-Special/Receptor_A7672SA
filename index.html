@@ -1234,6 +1234,7 @@
       <div class="tab" onclick="showTab('tcp', this)">TCP/IP</div>
       <div class="tab" onclick="showTab('fs', this)">Arquivos/SSL</div>
       <div class="tab" onclick="showTab('hw', this)">Hardware</div>
+      <div class="tab" onclick="showTab('bt', this)">Bluetooth</div>
       <div class="tab" onclick="showTab('info', this)">Info</div>
     </div>
 
@@ -2200,6 +2201,48 @@
       </div>
 
       <!-- ══════════ INFO ══════════ -->
+      <!-- ══════════ Bluetooth ══════════
+           O módulo tem BT clássico com SPP. Não tem BLE/GATT: AT+BTGATT e
+           AT+BTCONNECT respondem ERROR nesta build. -->
+      <div class="panel" id="panel-bt">
+        <div class="pane">
+          <h3>Bluetooth — AT+BT*</h3>
+
+          <div class="info-grid">
+            <div class="info-card"><div class="card-label">Rádio</div><div class="card-value" id="bt-power" style="font-size:15px;">--</div><div class="card-unit">AT+BTPOWER</div></div>
+            <div class="info-card"><div class="card-label">Nome</div><div class="card-value" id="bt-name" style="font-size:15px;">--</div><div class="card-unit">visível no scan</div></div>
+            <div class="info-card"><div class="card-label">Endereço</div><div class="card-value" id="bt-mac" style="font-size:14px;">--</div><div class="card-unit">MAC do módulo</div></div>
+            <div class="info-card"><div class="card-label">Encontrados</div><div class="card-value" id="bt-found" style="font-size:15px;">--</div><div class="card-unit">na última varredura</div></div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group f-curto">
+              <label>Varrer por (s)</label>
+              <input id="btScanSec" type="number" min="6" max="48" value="20"
+                     title="O módulo aceita de 6 a 48 segundos." />
+            </div>
+          </div>
+
+          <div class="btn-row">
+            <button class="action-btn" onclick="btPower(1)">🔵 Ligar rádio</button>
+            <button class="action-btn secondary" onclick="btPower(0)">⚫ Desligar</button>
+            <button class="action-btn" onclick="btScan()">📡 Buscar dispositivos</button>
+            <button class="action-btn secondary" onclick="btStatus()">🔄 Atualizar</button>
+            <button class="action-btn secondary" onclick="btPaired()">🔗 Pareados</button>
+          </div>
+
+          <div id="btLista" class="esp-redes-t" style="display:none;"></div>
+          <div id="btDispositivos" class="esp-redes"></div>
+
+          <div class="form-group" style="flex:1;min-height:0;">
+            <label>Saída do Bluetooth</label>
+            <div class="console-box" id="bt-console">Ligue o rádio e use "Buscar dispositivos".
+
+Esta build tem Bluetooth clássico com perfil SPP — sem BLE/GATT.</div>
+          </div>
+        </div>
+      </div>
+
       <div class="panel" id="panel-info">
         <div class="pane">
           <div class="info-grid">
@@ -2727,6 +2770,7 @@ const AT_SUGGESTIONS = [
   'AT+NETOPEN','AT+NETCLOSE','AT+IPADDR','AT+CIPOPEN?','AT+CIPCLOSE=0','AT+CIPRXGET=1','AT+CDNSGIP="google.com"',
   'AT+HTTPINIT','AT+HTTPTERM','AT+HTTPACTION=0','AT+HTTPACTION=1','AT+HTTPHEAD','AT+HTTPREAD=0,1024',
   'AT+CMQTTSTART','AT+CMQTTSTOP','AT+CMQTTDISC=0,120','AT+CMQTTREL=0',
+  'AT+BTPOWER=1','AT+BTPOWER=0','AT+BTPOWER?','AT+BTHOST?','AT+BTSCAN=1,1,20','AT+BTPAIRED?',
   'AT+FSCD?','AT+FSLS','AT+FSMEM','AT+CCERTLIST','AT+CSSLCFG="sslversion",0,4','AT+CSSLCFG="enableSNI",0,1',
   'AT+CBC','AT+CPMUTEMP','AT+CADC?','AT+CCLK?','AT+CTZU=1','AT+CSCLK=0','AT+CSCLK=1'
 ];
@@ -3451,7 +3495,7 @@ let headCapture = false;
 
 // URCs que podem chegar no meio de um payload (GNSS, MQTT, rede, chamada) e que
 // portanto não fazem parte do corpo de um HTTPREAD em andamento.
-const URC_PREFIXES = /^(\$G|\$B|\+CGNSSINFO|\+CGNSSPWR|\+CMQTT|\+CMTI|\+CMT:|\+CLIP|\+CREG|\+CGREG|\+CEREG|\+CSQ|\+CPSI|\+CIPRXGET|\+IPD|RECV FROM|RING|NO CARRIER|MISSED_CALL)/;
+const URC_PREFIXES = /^(\$G|\$B|\+BTSCAN|\+BTPOWER|\+BTHOST|\+CGNSSINFO|\+CGNSSPWR|\+CMQTT|\+CMTI|\+CMT:|\+CLIP|\+CREG|\+CGREG|\+CEREG|\+CSQ|\+CPSI|\+CIPRXGET|\+IPD|RECV FROM|RING|NO CARRIER|MISSED_CALL)/;
 
 function parseResponse(line) {
   // Antes de qualquer roteamento: o "SIM not inserted" chega como +CME ERROR e
@@ -3494,6 +3538,23 @@ function parseResponse(line) {
   if (line.startsWith('+CPIN:'))   return setText('n-sim', line.replace('+CPIN:', '').trim());
   if (line.startsWith('+CGPADDR:') || line.startsWith('+IPADDR:')) return parseIpAddr(line);
   if (line.startsWith('+CNMP:'))   return appendConsole('net-console', line, null);
+
+  // Bluetooth
+  if (line.startsWith('+BTSCAN:')) return parseBtScan(line);
+  if (line.startsWith('+BTPOWER:')) {
+    const on = line.includes('1');
+    setText('bt-power', on ? 'ligado' : 'desligado');
+    return appendConsole('bt-console', line, on ? 'ok' : null);
+  }
+  if (line.startsWith('+BTHOST:')) {
+    // +BTHOST: <nome>,<MAC> — o nome pode ter espaço, o MAC vem por último.
+    const corpo = line.replace('+BTHOST:', '').trim();
+    const i = corpo.lastIndexOf(',');
+    setText('bt-name', i > 0 ? corpo.slice(0, i).trim() : corpo);
+    setText('bt-mac',  i > 0 ? corpo.slice(i + 1).trim() : '--');
+    return appendConsole('bt-console', line, null);
+  }
+  if (line.startsWith('+BT')) return appendConsole('bt-console', line, null);
 
   // Os botões "Volume atual" e "Canal de áudio" perguntavam, o módulo
   // respondia, e a resposta não chegava a lugar nenhum: os dois cards da aba
@@ -5308,6 +5369,79 @@ async function fbRemoteClearLogs() {
   } catch (e) {
     fbrLog(`falha ao apagar: ${e.message}`, 'err');
   }
+}
+
+// ── Bluetooth ─────────────────────────────────────────────────
+// Bluetooth clássico com SPP. Esta build não tem BLE: AT+BTGATT,
+// AT+BTCONNECT e AT+BTVISIBILITY respondem ERROR.
+let btAchados = [];
+
+function btPower(on) {
+  send(`AT+BTPOWER=${on ? 1 : 0}`);
+  // O módulo leva um instante para o rádio subir; consultar direto pega o
+  // valor antigo.
+  setTimeout(btStatus, 1200);
+}
+
+function btStatus() {
+  send('AT+BTPOWER?');
+  setTimeout(() => send('AT+BTHOST?'), 300);
+}
+
+function btPaired() { send('AT+BTPAIRED?'); }
+
+async function btScan() {
+  const seg = Math.min(48, Math.max(6, parseInt(document.getElementById('btScanSec').value, 10) || 20));
+  btAchados = [];
+  document.getElementById('btDispositivos').innerHTML = '';
+  document.getElementById('btLista').style.display = 'none';
+  setText('bt-found', '...');
+  appendConsole('bt-console', `Varrendo por ${seg}s...`, null);
+
+  // Três parâmetros: <liga>,<modo>,<segundos>. Com dois o módulo devolve
+  // ERROR, o que faz parecer que o comando não existe.
+  send(`AT+BTSCAN=1,1,${seg}`);
+}
+
+// +BTSCAN: <índice>,<tipo>,<nome>,<MAC>,<RSSI>   — uma linha por dispositivo
+// +BTSCAN: 1                                     — fim da varredura
+function parseBtScan(line) {
+  const corpo = line.replace('+BTSCAN:', '').trim();
+  const p = corpo.split(',');
+
+  if (p.length < 4) {          // linha de fim
+    setText('bt-found', String(btAchados.length));
+    const t = document.getElementById('btLista');
+    t.style.display = btAchados.length ? '' : 'none';
+    t.textContent = `${btAchados.length} dispositivo(s) encontrado(s) — clique para parear:`;
+    appendConsole('bt-console', `Varredura concluída: ${btAchados.length} dispositivo(s).`, 'ok');
+    return;
+  }
+
+  // O nome pode conter vírgula, então o MAC e o RSSI são contados do fim.
+  const rssi = p[p.length - 1].trim();
+  const mac  = p[p.length - 2].trim();
+  const nome = p.slice(2, p.length - 2).join(',').trim();
+  const idx  = p[0].trim();
+  btAchados.push({ idx, nome, mac, rssi });
+
+  const caixa = document.getElementById('btDispositivos');
+  const el = document.createElement('div');
+  el.className = 'esp-rede';
+  el.title = `índice ${idx} · RSSI ${rssi}`;
+  el.innerHTML = `<span class="mark"></span>`
+               + `<span class="cadeado">🔵</span>`
+               + `<span class="nome">${escHtml(nome || '(sem nome)')}</span>`
+               + `<span class="rssi">${escHtml(mac)} · ${escHtml(rssi)}</span>`;
+  el.onclick = () => {
+    if (!confirm(`Parear com "${nome || mac}"?`)) return;
+    caixa.querySelectorAll('.esp-rede').forEach(x => x.classList.remove('atual'));
+    el.classList.add('atual');
+    send(`AT+BTPAIR=${idx}`);
+    appendConsole('bt-console', `Pareando com ${nome || mac} (índice ${idx})...`, null);
+  };
+  caixa.appendChild(el);
+  setText('bt-found', String(btAchados.length));
 }
 
 // ── MQTT ──────────────────────────────────────────────────────
