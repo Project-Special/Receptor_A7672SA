@@ -213,7 +213,7 @@
       border-bottom: 1px solid var(--border);
     }
 
-    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .btn-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
 
     #panel-map { position: relative; width: 100%; height: 100%; padding: 0; }
     /* a barra em si não captura cliques (deixa arrastar o mapa); os botões sim */
@@ -444,8 +444,23 @@
     .form-group textarea:focus,
     .form-group select:focus { border-color: #58a6ff66; }
 
-    .form-row { display: flex; gap: 10px; }
-    .form-row .form-group { flex: 1; }
+    /* flex-wrap é o que evita o recorte: entre 769 e ~1050px a fileira ainda
+       está em layout de 3 colunas, os <select> não encolhem abaixo da opção
+       mais longa e o .panel{overflow:hidden} cortava o excedente. */
+    .form-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+    .form-row .form-group { flex: 1 1 auto; min-width: 0; }
+
+    /* Escala única de larguras. Antes eram 13 valores escolhidos a olho, com
+       campos de mesma natureza divergindo — "Porta" (4 dígitos) tinha 130px e
+       "Contexto SSL" (1 dígito) tinha 170px. */
+    .f-curto { flex-basis: 150px; max-width: 150px; }
+    .f-medio { flex-basis: 200px; max-width: 200px; }
+    .f-longo { flex-basis: 240px; max-width: 240px; }
+    .f-xl    { flex-basis: 280px; max-width: 280px; }
+
+    /* Rótulo longo quebrando em duas linhas empurrava só aquele input para
+       baixo; reservar a altura alinha a fileira inteira. */
+    .form-row .form-group label { min-height: 2.6em; display: flex; align-items: flex-end; line-height: 1.25; }
 
     .action-btn {
       background: var(--accent);
@@ -521,18 +536,18 @@
        MÍNIMA (M)" quebra em duas linhas e empurrava só aquele input para
        baixo. Reservar a altura de duas linhas e ancorar o texto embaixo
        alinha todos, inclusive quando outro rótulo quebrar numa tela menor. */
-    #panel-esp32 .form-row .form-group label {
-      min-height: 2.6em;
-      display: flex;
-      align-items: flex-end;
-      line-height: 1.25;
-    }
-    /* min-width menor que o conteúdo natural do input: sem isto os seis
-       campos somam mais que a largura útil e a fileira transbordava em vez
-       de passar para a linha de baixo. */
-    #panel-esp32 .form-row { align-items: flex-end; flex-wrap: wrap; }
-    #panel-esp32 .form-row .form-group { min-width: 130px; flex: 1 1 130px; }
+
+    /* Três larguras em vez de um max-width escolhido a olho por campo. Com
+       valores ad hoc, campos de mesma natureza (intervalo, heartbeat) ficavam
+       com tamanhos diferentes e a fileira parecia desalinhada mesmo estando
+       correta. */
     #panel-esp32 .esp-sec { min-width: 0; }
+
+    @media (max-width: 768px) {
+      /* Empilhado, largura fixa só deixaria os campos estreitos à toa. */
+      .f-curto, .f-medio, .f-longo, .f-xl { flex-basis: 100% !important; max-width: none !important; }
+      .form-row .form-group label { min-height: 0; }
+    }
     @media (max-width: 768px) {
       /* Empilhado, cada rótulo fica junto do seu campo e a reserva sobra. */
       #panel-esp32 .form-row .form-group label { min-height: 0; }
@@ -1451,15 +1466,15 @@
               <label>APN</label>
               <input id="apnInput" type="text" placeholder="ex: claro.com.br / zap.vivo.com.br / tim.br" />
             </div>
-            <div class="form-group" style="max-width:170px;">
+            <div class="form-group f-medio">
               <label>Usuário</label>
               <input id="apnUser" type="text" placeholder="(opcional)" />
             </div>
-            <div class="form-group" style="max-width:170px;">
+            <div class="form-group f-medio">
               <label>Senha</label>
               <input id="apnPass" type="text" placeholder="(opcional)" />
             </div>
-            <div class="form-group" style="max-width:210px;">
+            <div class="form-group f-longo">
               <label>Preferência de rede</label>
               <select id="cnmpSel">
                 <option value="2" selected>2 — Automático</option>
@@ -1568,7 +1583,7 @@
               <label>Número destino</label>
               <input type="tel" id="smsNumber" placeholder="+5511999999999" />
             </div>
-            <div class="form-group" style="max-width:190px;">
+            <div class="form-group f-medio">
               <label>Codificação</label>
               <select id="smsCharset">
                 <option value="GSM" selected>GSM (sem acento)</option>
@@ -1609,7 +1624,7 @@
               <label>Número</label>
               <input type="tel" id="callNumber" placeholder="+5511999999999" />
             </div>
-            <div class="form-group" style="max-width:200px;">
+            <div class="form-group f-longo">
               <label>Canal de áudio</label>
               <select id="audioDevSel" onchange="applyAudioDevice()">
                 <option value="1">1 — Handset</option>
@@ -1617,7 +1632,7 @@
                 <option value="3" selected>3 — Speaker</option>
               </select>
             </div>
-            <div class="form-group" style="max-width:200px;">
+            <div class="form-group f-longo">
               <label>Volume <span id="volLabel" class="pill">3</span></label>
               <input type="range" id="volRange" min="0" max="5" value="3" oninput="document.getElementById('volLabel').textContent=this.value" onchange="applyVolume()" />
             </div>
@@ -1651,7 +1666,7 @@
               <label>URL</label>
               <input id="httpUrlInput" type="text" value="https://httpbin.org/get" placeholder="https://httpbin.org/get" />
             </div>
-            <div class="form-group" style="max-width:160px;">
+            <div class="form-group f-medio">
               <label>Método</label>
               <select id="httpMethodInput">
                 <option value="0" selected>GET</option>
@@ -1660,7 +1675,7 @@
                 <option value="3">DELETE</option>
               </select>
             </div>
-            <div class="form-group" style="max-width:200px;">
+            <div class="form-group f-medio">
               <label>Content-Type</label>
               <input id="httpContentType" type="text" value="application/json" />
             </div>
@@ -1708,22 +1723,22 @@
               <input id="fbHost" type="text" value="rastreador-gps-c1dc7-default-rtdb.firebaseio.com"
                      placeholder="projeto-default-rtdb.firebaseio.com" />
             </div>
-            <div class="form-group" style="max-width:230px;">
+            <div class="form-group f-longo">
               <label>Web API Key</label>
               <input id="fbKey" type="password" placeholder="AIza..." />
             </div>
           </div>
 
           <div class="form-row">
-            <div class="form-group" style="max-width:220px;">
+            <div class="form-group f-longo">
               <label>ID do dispositivo</label>
               <input id="fbDevice" type="text" value="rastreador01" />
             </div>
-            <div class="form-group" style="max-width:150px;">
+            <div class="form-group f-curto">
               <label>Intervalo (s)</label>
               <input id="fbInterval" type="number" min="5" value="30" onchange="firebaseIntervalChanged()" />
             </div>
-            <div class="form-group" style="max-width:210px;">
+            <div class="form-group f-longo">
               <label>Histórico</label>
               <select id="fbTrack">
                 <option value="1" selected>Última + histórico do dia</option>
@@ -1788,31 +1803,31 @@
           <div class="esp-sec">
             <div class="esp-sec-t">📍 Rastreamento</div>
             <div class="form-row">
-              <div class="form-group" style="max-width:190px;">
+              <div class="form-group f-medio">
                 <label>ID do device</label>
                 <input id="fbRemoteDevice" type="text" value="esp32-01" onchange="fbRemoteLoadConfig()" />
               </div>
-              <div class="form-group" style="max-width:145px;">
+              <div class="form-group f-curto">
                 <label>Publicar a cada (s)</label>
                 <input id="fbRemoteInterval" type="number" min="5" max="3600" value="30" />
               </div>
-              <div class="form-group" style="max-width:150px;">
+              <div class="form-group f-curto">
                 <label>Dist. mínima (m)</label>
                 <input id="fbRemoteMinDist" type="number" min="0" max="10000" value="0"
                        title="0 envia todo ciclo. Parado, o GPS oscila 7 a 17 m e cada oscilação vira um ponto novo; 15 a 25 m corta isso." />
               </div>
-              <div class="form-group" style="max-width:140px;">
+              <div class="form-group f-curto">
                 <label>Heartbeat (s)</label>
                 <input id="fbRemoteStatusEvery" type="number" min="10" max="3600" value="60" />
               </div>
-              <div class="form-group" style="max-width:200px;">
+              <div class="form-group f-medio">
                 <label>Histórico</label>
                 <select id="fbRemoteTrack">
                   <option value="1" selected>Última + histórico do dia</option>
                   <option value="0">Só a última posição</option>
                 </select>
               </div>
-              <div class="form-group" style="max-width:210px;">
+              <div class="form-group f-longo">
                 <label>Fuso horário</label>
                 <select id="fbRemoteTz"
                         title="Define a hora do display e o corte do dia no histórico. O campo utc de cada ponto continua em UTC.">
@@ -1821,6 +1836,14 @@
                   <option value="-300">Acre (UTC−5)</option>
                   <option value="-120">Fernando de Noronha (UTC−2)</option>
                   <option value="0">UTC (sem ajuste)</option>
+                </select>
+              </div>
+              <div class="form-group f-medio">
+                <label>Display</label>
+                <select id="fbRemoteDisplay"
+                        title="Padrão desligado. Sem tela o firmware não inicializa o SPI, não monta o cache de mapa e não baixa tiles — nada disso consome tempo do ESP32.">
+                  <option value="0" selected>Sem tela (padrão)</option>
+                  <option value="1">Com tela acoplada</option>
                 </select>
               </div>
             </div>
@@ -1844,7 +1867,7 @@
               <span class="esp-hint">só para baixar os tiles do mapa — o rastreamento vai pelo chip</span>
             </div>
             <div class="form-row">
-              <div class="form-group" style="max-width:240px;">
+              <div class="form-group f-longo">
                 <label>Rede</label>
                 <!-- datalist em vez de select: dá para escolher da varredura
                      ou digitar uma rede oculta, que não aparece na lista. -->
@@ -1852,7 +1875,7 @@
                        autocomplete="off" list="fbWifiRedes" />
                 <datalist id="fbWifiRedes"></datalist>
               </div>
-              <div class="form-group" style="max-width:240px;">
+              <div class="form-group f-longo">
                 <label>Senha</label>
                 <input id="fbWifiPass" type="password" placeholder="senha da rede" autocomplete="new-password" />
               </div>
@@ -1899,22 +1922,22 @@
               <label>Broker</label>
               <input id="mqttHost" type="text" value="tcp://broker.hivemq.com:1883" placeholder="tcp://host:1883 ou ssl://host:8883" />
             </div>
-            <div class="form-group" style="max-width:190px;">
+            <div class="form-group f-medio">
               <label>Client ID</label>
               <input id="mqttClientId" type="text" value="a7672sa-01" />
             </div>
-            <div class="form-group" style="max-width:140px;">
+            <div class="form-group f-curto">
               <label>Keepalive</label>
               <input id="mqttKeepalive" type="number" value="60" min="10" max="64800" />
             </div>
           </div>
 
           <div class="form-row">
-            <div class="form-group" style="max-width:200px;">
+            <div class="form-group f-medio">
               <label>Usuário</label>
               <input id="mqttUser" type="text" placeholder="(opcional)" />
             </div>
-            <div class="form-group" style="max-width:200px;">
+            <div class="form-group f-medio">
               <label>Senha</label>
               <input id="mqttPass" type="text" placeholder="(opcional)" />
             </div>
@@ -1922,7 +1945,7 @@
               <label>Tópico</label>
               <input id="mqttTopic" type="text" value="a7672sa/teste" />
             </div>
-            <div class="form-group" style="max-width:110px;">
+            <div class="form-group f-curto">
               <label>QoS</label>
               <select id="mqttQos"><option>0</option><option selected>1</option><option>2</option></select>
             </div>
@@ -1965,11 +1988,11 @@
           <h3>Sockets TCP/UDP — AT+NETOPEN / AT+CIPOPEN</h3>
 
           <div class="form-row">
-            <div class="form-group" style="max-width:120px;">
+            <div class="form-group f-curto">
               <label>Link ID</label>
               <input id="tcpLink" type="number" value="0" min="0" max="9" />
             </div>
-            <div class="form-group" style="max-width:130px;">
+            <div class="form-group f-curto">
               <label>Protocolo</label>
               <select id="tcpProto"><option value="TCP" selected>TCP</option><option value="UDP">UDP</option></select>
             </div>
@@ -1977,7 +2000,7 @@
               <label>Host</label>
               <input id="tcpHost" type="text" value="tcpbin.com" />
             </div>
-            <div class="form-group" style="max-width:130px;">
+            <div class="form-group f-curto">
               <label>Porta</label>
               <input id="tcpPort" type="number" value="4242" />
             </div>
@@ -2019,7 +2042,7 @@
           <h3>Sistema de arquivos e certificados</h3>
 
           <div class="form-row">
-            <div class="form-group" style="max-width:220px;">
+            <div class="form-group f-medio">
               <label>Diretório</label>
               <select id="fsDir">
                 <option value="C:/" selected>C:/ (memória interna)</option>
@@ -2047,11 +2070,11 @@
           </div>
 
           <div class="form-row">
-            <div class="form-group" style="max-width:170px;">
+            <div class="form-group f-curto">
               <label>Contexto SSL</label>
               <input id="sslCtx" type="number" value="0" min="0" max="9" />
             </div>
-            <div class="form-group" style="max-width:220px;">
+            <div class="form-group f-medio">
               <label>Versão TLS</label>
               <select id="sslVer">
                 <option value="0">0 — SSL 3.0</option>
@@ -2061,7 +2084,7 @@
                 <option value="4" selected>4 — Todas</option>
               </select>
             </div>
-            <div class="form-group" style="max-width:250px;">
+            <div class="form-group f-xl">
               <label>Modo de autenticação</label>
               <select id="sslAuth">
                 <option value="0" selected>0 — Sem verificação</option>
@@ -2096,15 +2119,15 @@
 
           <div class="section-title">GPIO</div>
           <div class="form-row">
-            <div class="form-group" style="max-width:150px;">
+            <div class="form-group f-curto">
               <label>GPIO nº</label>
               <input id="gpioNum" type="number" value="1" min="1" max="12" />
             </div>
-            <div class="form-group" style="max-width:190px;">
+            <div class="form-group f-medio">
               <label>Direção</label>
               <select id="gpioDir"><option value="0">0 — Entrada</option><option value="1" selected>1 — Saída</option></select>
             </div>
-            <div class="form-group" style="max-width:190px;">
+            <div class="form-group f-medio">
               <label>Nível</label>
               <select id="gpioVal"><option value="0">0 — Baixo</option><option value="1" selected>1 — Alto</option></select>
             </div>
@@ -2121,7 +2144,7 @@
               <label>Servidor NTP</label>
               <input id="ntpServer" type="text" value="pool.ntp.org" />
             </div>
-            <div class="form-group" style="max-width:190px;">
+            <div class="form-group f-curto">
               <label>Fuso (quartos de hora)</label>
               <input id="ntpZone" type="number" value="-12" />
             </div>
@@ -3417,6 +3440,26 @@ function parseResponse(line) {
   if (line.startsWith('+CPIN:'))   return setText('n-sim', line.replace('+CPIN:', '').trim());
   if (line.startsWith('+CGPADDR:') || line.startsWith('+IPADDR:')) return parseIpAddr(line);
   if (line.startsWith('+CNMP:'))   return appendConsole('net-console', line, null);
+
+  // Os botões "Volume atual" e "Canal de áudio" perguntavam, o módulo
+  // respondia, e a resposta não chegava a lugar nenhum: os dois cards da aba
+  // Voz ficavam em "--" para sempre.
+  if (line.startsWith('+CLVL:')) {
+    const v = line.replace('+CLVL:', '').trim();
+    setText('v-vol', v);
+    const r = document.getElementById('volRange');
+    const l = document.getElementById('volLabel');
+    if (r && v !== '') { r.value = v; if (l) l.textContent = v; }
+    return;
+  }
+  if (line.startsWith('+CSDVC:')) {
+    const n = parseInt(line.replace('+CSDVC:', '').trim(), 10);
+    const nomes = { 1: 'Handset', 2: 'Headset', 3: 'Viva-voz' };
+    setText('v-dev', nomes[n] || (isNaN(n) ? '--' : String(n)));
+    const sel = document.getElementById('audioDevSel');
+    if (sel && !isNaN(n)) sel.value = String(n);
+    return;
+  }
   if (line.startsWith('+CNSMOD:')) return parseCNSMOD(line);
   if (line.startsWith('+CDNSGIP:') || line.startsWith('+CPING:')) return appendConsole('net-console', line, null);
 
@@ -4895,6 +4938,160 @@ function fbrLog(msg, cls = '') {
 function fbrNum(id, min, max, padrao) {
   const v = parseInt(document.getElementById(id).value, 10);
   return isNaN(v) ? padrao : Math.min(max, Math.max(min, v));
+}
+
+// ── Wi-Fi do ESP32: pelo cabo, nunca pelo banco ───────────────
+// A senha vai do navegador direto para a NVS do device, pela serial. Nao passa
+// pelo Firebase (cuja Web API Key e publica) nem fica no localStorage.
+function espSerialPronta() {
+  if (!connected || getConnMode() !== 'esp32') {
+    alert('Conecte primeiro em Interface → "ESP32 (ponte USB)".\n\n'
+        + 'A senha do Wi-Fi vai pelo cabo, direto para o ESP32 — '
+        + 'de propósito, para não passar pelo Firebase.');
+    return false;
+  }
+  return true;
+}
+
+// Escapa o que quebraria o JSON da linha @WIFI. Aspas e barra são o caso
+// comum; os caracteres de controle entram porque o firmware lê linha a linha —
+// um \n colado no campo cortaria o comando ao meio, em silêncio.
+function espJsonStr(s) {
+  return String(s)
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/[\x00-\x1f]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
+}
+
+async function espWifiMudar() {
+  if (!espSerialPronta()) return;
+  const ssid = (document.getElementById('fbWifiSsid').value || '').trim();
+  const pass = document.getElementById('fbWifiPass').value || '';
+  if (!ssid) { alert('Informe o nome da rede.'); return; }
+
+  const resp = waitFor(l => l.startsWith('@WIFI:'), 20000);
+  await writeRaw(`@WIFI {"ssid":"${espJsonStr(ssid)}","pass":"${espJsonStr(pass)}"}\r\n`);
+  document.getElementById('fbWifiPass').value = '';   // não deixa a senha na tela
+
+  const r = await resp;
+  if (!r) { fbrLog('ESP32 nao respondeu ao @WIFI.', 'err'); return; }
+  if (r.includes('SALVO') || r.includes('OK')) espWifiEmUso = ssid;
+  if (r.includes('OK'))        fbrLog(`Wi-Fi trocado para "${ssid}" — ${r.replace('@WIFI:OK', 'IP')}`, 'ok');
+  else if (r.includes('FALHA')) fbrLog(`Rede "${ssid}" gravada, mas nao conectou. Confira a senha.`, 'warn');
+  else                          fbrLog(`ESP32: ${r}`, 'err');
+}
+
+// Rede que o ESP32 está usando agora, para marcá-la na lista. Preenchida
+// pelo @WIFI? e pela resposta do @WIFI.
+let espWifiEmUso = '';
+
+// Varre as redes pelo próprio ESP32 — é o rádio dele que importa, não o do
+// PC: a rede que aparece forte aqui pode não alcançar onde o aparelho fica.
+async function espWifiScan() {
+  if (!espSerialPronta()) return;
+  const btn = document.getElementById('espScanBtn');
+  const caixa = document.getElementById('espRedes');
+  const antes = btn.textContent;
+  btn.textContent = '📡 buscando...';
+  btn.disabled = true;
+  caixa.innerHTML = '';
+
+  const redes = [];
+  // O firmware emite uma linha por rede e fecha com '@SCAN:FIM <n>'. O waiter
+  // vê todas as linhas, então acumula no caminho e só resolve no fechamento.
+  const parar = waitFor(l => {
+    const t = l.trim();
+    if (t.startsWith('@SCAN:NET ')) {
+      try { redes.push(JSON.parse(t.slice(10))); } catch (_) {}
+    }
+    return t.startsWith('@SCAN:FIM') || t.startsWith('@SCAN:JA_RODANDO');
+  }, 25000);
+
+  await writeRaw('@SCAN\r\n');
+  const fim = await parar;
+  btn.textContent = antes;
+  btn.disabled = false;
+
+  if (!fim) { fbrLog('ESP32 nao respondeu a varredura.', 'err'); return; }
+  if (fim.includes('JA_RODANDO')) { fbrLog('Varredura ja em andamento — tente de novo em alguns segundos.', 'warn'); return; }
+  if (!redes.length) { fbrLog('Nenhuma rede encontrada pelo ESP32.', 'warn'); return; }
+
+  // Mais forte primeiro, sem repetir SSID (roteador mesh aparece várias vezes).
+  redes.sort((a, b) => b.rssi - a.rssi);
+  const vistos = new Set();
+  const lista = redes.filter(r => r.ssid && !vistos.has(r.ssid) && vistos.add(r.ssid));
+
+  const atual = (document.getElementById('fbWifiSsid').value || '').trim();
+  const emUso = espWifiEmUso;   // a que o ESP32 está usando agora, se souber
+  const dl = document.getElementById('fbWifiRedes');
+  dl.innerHTML = lista.map(r => `<option value="${r.ssid.replace(/"/g, '&quot;')}"></option>`).join('');
+
+  const titulo = document.createElement('div');
+  titulo.className = 'esp-redes-t';
+  titulo.textContent = `Selecione a rede que o ESP32 vai usar (${lista.length} encontradas):`;
+  caixa.appendChild(titulo);
+
+  const linhas = document.createElement('div');
+  linhas.className = 'esp-redes';
+  caixa.appendChild(linhas);
+
+  for (const r of lista) {
+    const el = document.createElement('div');
+    el.className = 'esp-rede' + (r.ssid === atual ? ' atual' : '');
+    el.title = `${r.rssi} dBm${r.aberta ? ' · rede aberta' : ''}`;
+    const barras = r.rssi >= -55 ? '▂▄▆█' : r.rssi >= -67 ? '▂▄▆' : r.rssi >= -78 ? '▂▄' : '▂';
+    el.innerHTML = `<span class="mark"></span>`
+                 + `<span class="cadeado">${r.aberta ? '🔓' : '🔒'}</span>`
+                 + `<span class="nome">${r.ssid.replace(/</g, '&lt;')}</span>`
+                 + (r.ssid === emUso ? `<span class="usada">em uso</span>` : '')
+                 + `<span class="rssi">${barras} ${r.rssi} dBm</span>`;
+    el.onclick = () => {
+      document.getElementById('fbWifiSsid').value = r.ssid;
+      linhas.querySelectorAll('.esp-rede').forEach(x => x.classList.remove('atual'));
+      el.classList.add('atual');
+      // Rede aberta não tem senha: mandar direto para o botão poupa o passo.
+      document.getElementById('fbWifiPass').value = '';
+      document.getElementById(r.aberta ? 'fbWifiSsid' : 'fbWifiPass').focus();
+      fbrLog(`Rede "${r.ssid}" selecionada${r.aberta ? ' (aberta)' : ''}. `
+           + 'Preencha a senha e use "Mudar Wi-Fi".', 'ok');
+    };
+    linhas.appendChild(el);
+  }
+  fbrLog(`${lista.length} rede(s) encontrada(s) pelo ESP32.`, 'ok');
+}
+
+async function espWifiConsultar() {
+  if (!espSerialPronta()) return;
+  const resp = waitFor(l => l.startsWith('@WIFI:'), 6000);
+  await writeRaw('@WIFI?\r\n');
+  const r = await resp;
+  if (!r) { fbrLog('ESP32 nao respondeu.', 'err'); return; }
+
+  // '@WIFI:SSID <nome> CONECTADO <ip>' — guarda o nome para marcar na lista.
+  const m = r.match(/@WIFI:SSID\s+(.*?)\s+(?:CONECTADO|DESCONECTADO)/);
+  if (m) {
+    espWifiEmUso = m[1];
+    document.querySelectorAll('#espRedes .esp-rede').forEach(el => {
+      const nome = el.querySelector('.nome')?.textContent;
+      if (nome === espWifiEmUso && !el.querySelector('.usada')) {
+        const tag = document.createElement('span');
+        tag.className = 'usada'; tag.textContent = 'em uso';
+        el.insertBefore(tag, el.querySelector('.rssi'));
+      }
+    });
+  }
+  fbrLog(`Rede no ESP32: ${r.replace('@WIFI:', '')}`, 'ok');
+}
+
+async function espWifiApagar() {
+  if (!espSerialPronta()) return;
+  if (!confirm('Apagar a rede Wi-Fi salva no ESP32?\n\n'
+             + 'Ele volta a usar a rede do secrets.h, se houver, e o mapa passa a '
+             + 'funcionar só com os tiles já baixados.')) return;
+  const resp = waitFor(l => l.startsWith('@WIFI:'), 8000);
+  await writeRaw('@WIFI!\r\n');
+  const r = await resp;
+  fbrLog(r ? `ESP32: ${r.replace('@WIFI:', '')}` : 'ESP32 nao respondeu.', 'warn');
 }
 
 // ── Configuracao da unidade: tudo pelo cabo ───────────────────
