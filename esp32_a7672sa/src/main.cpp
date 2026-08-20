@@ -436,6 +436,7 @@ void setup() {
   cfg.carregar();
   displayAtivo = cfg.display;
   logf("Config da unidade: %s", cfg.paraJson().c_str());
+  logf("Firmware: %s", __DATE__ " " __TIME__);
 
   if (displayAtivo) {
     ui.begin();

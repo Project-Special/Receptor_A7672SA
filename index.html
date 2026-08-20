@@ -2583,8 +2583,17 @@ function logRx(line) {
   else if (line.startsWith('ERROR') || line.startsWith('+CME ERROR') || line.startsWith('+CMS ERROR')) cls = 'err';
   else if (line.startsWith('+') || line.startsWith('$')) cls = 'urc';
   log('rx', line, cls);
-  notifyWaiters(line);
-  try { parseResponse(line); } catch (e) { console.error('parse', line, e); }
+
+  // Ligado ao ESP32 fora do modo ponte, o que chega é o log do firmware: ele
+  // ecoa as respostas do módulo prefixadas com '<< '. O terminal acima mostra
+  // a linha como veio, mas parser e waiters precisam dela limpa — senão uma
+  // sentença NMEA vira "<< $GNRMC..." e nenhum parser reconhece.
+  //
+  // Só o '<< ' sai. O '>> ' marca o que o ESP32 ENVIOU ao módulo, e tratar
+  // comando como resposta daria falso positivo nos waiters.
+  const resp = line.startsWith('<<') ? line.replace(/^<<\s?/, '') : line;
+  notifyWaiters(resp);
+  try { parseResponse(resp); } catch (e) { console.error('parse', resp, e); }
 }
 
 // ============================================================

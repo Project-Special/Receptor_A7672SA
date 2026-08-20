@@ -30,7 +30,31 @@ static bool paraBool(const String& v, bool atual) {
   return atual;
 }
 
+// Identifica o binário. Muda a cada compilação, que é justamente o gatilho:
+// firmware novo gravado = configuração de fábrica.
+static const char* kBuild = __DATE__ " " __TIME__;
+
+void CfgUnidade::restaurarPadrao() {
+  *this = CfgUnidade{};    // os defaults declarados no cabeçalho
+  salvar();
+}
+
 void CfgUnidade::carregar() {
+  {
+    Preferences p;
+    if (p.begin(kNs, false)) {
+      String gravado = p.getString("build", "");
+      if (gravado != kBuild) {
+        p.end();
+        restaurarPadrao();
+        Preferences q;
+        if (q.begin(kNs, false)) { q.putString("build", kBuild); q.end(); }
+        return;                      // nada de ler o que ficou da versão antiga
+      }
+      p.end();
+    }
+  }
+
   Preferences p;
   if (!p.begin(kNs, true)) return;
   enviar     = p.getBool("enviar", enviar);

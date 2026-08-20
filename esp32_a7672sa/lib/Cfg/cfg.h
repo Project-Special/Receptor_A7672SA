@@ -23,9 +23,19 @@ struct CfgUnidade {
   float    distMin     = 0;       // m; 0 = envia todo ciclo
   int      tzMin       = -180;    // fuso em minutos
 
+  // Carrega da NVS — ou volta aos padrões de fábrica se o firmware mudou.
+  //
+  // A NVS sobrevive à gravação do firmware, então uma unidade que teve o
+  // display ligado em bancada continuava ligando depois de regravada: o
+  // "padrão desligado" só valia em placa virgem. Gravar novo firmware passa a
+  // significar configuração de fábrica, que é o que se espera ao montar uma
+  // unidade nova.
   void carregar();
   void salvar() const;
   String paraJson() const;
+
+  // Volta tudo ao padrão de fábrica e grava.
+  void restaurarPadrao();
 
   // Aplica os campos presentes no JSON. Devolve true se algo mudou.
   bool aplicarJson(const String& json);
