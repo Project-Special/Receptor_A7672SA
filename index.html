@@ -871,6 +871,7 @@
   <select id="connMode" onchange="onConnModeChange()">
     <option value="serial" selected>Serial (USB/UART)</option>
     <option value="esp32">ESP32 (ponte USB)</option>
+    <option value="ble">Bluetooth (BLE, sem cabo)</option>
     <option value="websocket">WebSocket Bridge (Python)</option>
     <option value="simulator">Simulador (sem hardware)</option>
   </select>
@@ -2430,11 +2431,15 @@ async function connect() {
   const mode = getConnMode();
   if (mode === 'websocket') await connectWebSocket();
   else if (mode === 'simulator') enterSimulationMode();
+  else if (mode === 'ble') await connectBle();
   else await connectSerial();
 
   // O ESP32 e o app disputariam a UART do módulo. '@BRIDGE' faz o firmware
   // sair de cena e virar um cabo: ele para de mandar comandos e repassa bytes
   // crus nos dois sentidos, até receber '@NORMAL'.
+  // Em BLE não há comandos AT: o firmware responde só a @CFG/@WIFI/@SCAN.
+  if (connected && mode === 'ble') setCommandsEnabled(false);
+
   if (connected && mode === 'esp32') {
     // Abrir a porta pelo Web Serial pulsa DTR/RTS e reinicia o ESP32, que só
     // passa a ler a USB depois do setup — algo entre 10 e 25 s, mais se o
@@ -2492,6 +2497,84 @@ async function connectSerial() {
   } catch (e) {
     setStatus('disconnected');
     log('sys', `Erro ao conectar: ${e.message}`, 'err');
+  }
+}
+
+// ── Transporte BLE ────────────────────────────────────────────
+// Fala com o BLE do ESP32-S3, não com o Bluetooth do A7672: o módulo tem BT
+// clássico com SPP, que navegador nenhum alcança — a Web Bluetooth só faz
+// BLE/GATT. Serviço NUS, o mesmo que apps de terminal BLE usam.
+const BLE_SERV = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const BLE_RX   = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';   // write: app -> device
+const BLE_TX   = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';   // notify: device -> app
+
+let bleDisp = null, bleRxChar = null, bleBuf = '';
+
+function bleUsavel() {
+  return 'bluetooth' in navigator && typeof navigator.bluetooth.requestDevice === 'function';
+}
+
+async function connectBle() {
+  if (!bleUsavel()) {
+    log('sys', '⚠️ Web Bluetooth indisponível neste navegador.', 'err');
+    log('sys', 'Use Chrome/Edge no desktop ou Chrome no Android. Safari e iOS não têm Web Bluetooth.', 'info');
+    setStatus('disconnected');
+    return;
+  }
+  try {
+    setStatus('connecting');
+    log('sys', 'Escolha o aparelho na janela do navegador...', 'info');
+    // Filtra pelo serviço, não pelo nome: assim qualquer unidade aparece,
+    // independente do ID que estiver configurado nela.
+    bleDisp = await navigator.bluetooth.requestDevice({ filters: [{ services: [BLE_SERV] }] });
+
+    bleDisp.addEventListener('gattserverdisconnected', () => {
+      if (!connected) return;
+      connected = false; connectedTransport = null; bleRxChar = null;
+      setStatus('disconnected');
+      log('sys', 'Bluetooth desconectado.', 'err');
+    });
+
+    const gatt = await bleDisp.gatt.connect();
+    const serv = await gatt.getPrimaryService(BLE_SERV);
+    bleRxChar  = await serv.getCharacteristic(BLE_RX);
+    const tx   = await serv.getCharacteristic(BLE_TX);
+
+    // As notificações chegam em pedaços de ~20 bytes (MTU padrão), então o
+    // buffer remonta as linhas antes de entregar ao parser.
+    await tx.startNotifications();
+    tx.addEventListener('characteristicvaluechanged', ev => {
+      bleBuf += new TextDecoder().decode(ev.target.value);
+      let i;
+      while ((i = bleBuf.search(/[\r\n]/)) >= 0) {
+        const linha = bleBuf.slice(0, i).trim();
+        bleBuf = bleBuf.slice(i + 1);
+        if (linha) logRx(linha);
+      }
+    });
+
+    connected = true;
+    connectedTransport = 'ble';
+    setStatus('connected');
+    log('sys', `Conectado por Bluetooth a "${bleDisp.name || 'device'}".`, 'ok');
+    document.getElementById('connInfo').textContent = `BLE · ${bleDisp.name || ''}`;
+    log('sys', 'Comandos AT não passam por aqui — só configuração (@CFG, @WIFI, @SCAN).', 'info');
+    setTimeout(() => { if (connected) writeRaw('@CFG?\r\n'); }, 400);
+  } catch (e) {
+    setStatus('disconnected');
+    // Cancelar a janela de escolha não é erro.
+    log('sys', /cancel|User cancelled/i.test(e.message)
+      ? 'Seleção de aparelho cancelada.'
+      : `Erro no Bluetooth: ${e.message}`, /cancel/i.test(e.message) ? 'info' : 'err');
+  }
+}
+
+async function bleEscrever(texto) {
+  if (!bleRxChar) throw new Error('BLE não conectado');
+  const dados = new TextEncoder().encode(texto);
+  // Mesma limitação de MTU na ida.
+  for (let i = 0; i < dados.length; i += 20) {
+    await bleRxChar.writeValue(dados.slice(i, i + 20));
   }
 }
 
@@ -2585,6 +2668,9 @@ async function disconnect() {
       if (port) { await port.close(); port = null; }
     } else if (connectedTransport === 'websocket') {
       if (wsConn) { try { wsConn.send(JSON.stringify({ type: 'close' })); } catch (_) {} wsConn.close(); wsConn = null; }
+    } else if (connectedTransport === 'ble') {
+      if (bleDisp?.gatt?.connected) bleDisp.gatt.disconnect();
+      bleDisp = null; bleRxChar = null; bleBuf = '';
     } else if (connectedTransport === 'simulator') {
       stopSimTimers();
     }
@@ -2683,6 +2769,8 @@ async function writeRaw(text) {
   } else if (connectedTransport === 'websocket') {
     if (!wsConn || wsConn.readyState !== WebSocket.OPEN) throw new Error('WebSocket fechado');
     wsConn.send(JSON.stringify({ type: 'tx', data: text }));
+  } else if (connectedTransport === 'ble') {
+    await bleEscrever(text);
   } else {
     return false;
   }
@@ -2964,8 +3052,8 @@ function setCommandsEnabled(on) {
 
 function onConnModeChange() {
   const mode = getConnMode();
-  const isWs = mode === 'websocket', isSim = mode === 'simulator';
-  const hasPort = !isSim;
+  const isWs = mode === 'websocket', isSim = mode === 'simulator', isBle = mode === 'ble';
+  const hasPort = !isSim && !isBle;
   const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
 
   show('portLabel', hasPort);
@@ -2977,8 +3065,9 @@ function onConnModeChange() {
 
   const detect = document.getElementById('detectBtn');
   const info = document.getElementById('connInfo');
-  detect.style.display = isSim ? 'none' : '';
+  detect.style.display = (isSim || isBle) ? 'none' : '';
   if (isSim) { info.textContent = 'Simulador — nada é enviado ao hardware'; }
+  else if (isBle) { info.textContent = 'Configuração sem cabo — o ESP32 precisa estar com BLE ligado'; }
   else if (isWs) { detect.textContent = '🔍 Listar portas (bridge)'; info.textContent = 'Rode: python a7672_bridge.py'; }
   else if (mode === 'esp32') {
     detect.textContent = '🔍 Detectar Portas';

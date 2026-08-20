@@ -18,6 +18,7 @@ struct CfgUnidade {
   bool     enviar      = false;   // rastreamento ligado?
   bool     historico   = true;    // grava a trilha, além da última posição
   bool     display     = false;   // há tela acoplada nesta unidade
+  bool     ble         = false;   // aceita configuração pelo celular via BLE
   uint32_t intervalo   = 30;      // s entre envios
   uint32_t statusCada  = 60;      // s entre heartbeats
   float    distMin     = 0;       // m; 0 = envia todo ciclo

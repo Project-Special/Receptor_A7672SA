@@ -60,6 +60,7 @@ void CfgUnidade::carregar() {
   enviar     = p.getBool("enviar", enviar);
   historico  = p.getBool("hist", historico);
   display    = p.getBool("display", display);
+  ble        = p.getBool("ble", ble);
   intervalo  = p.getUInt("intv", intervalo);
   statusCada = p.getUInt("stat", statusCada);
   distMin    = p.getFloat("dist", distMin);
@@ -73,6 +74,7 @@ void CfgUnidade::salvar() const {
   p.putBool("enviar", enviar);
   p.putBool("hist", historico);
   p.putBool("display", display);
+  p.putBool("ble", ble);
   p.putUInt("intv", intervalo);
   p.putUInt("stat", statusCada);
   p.putFloat("dist", distMin);
@@ -85,6 +87,7 @@ String CfgUnidade::paraJson() const {
   j += "\"enviar\":"    + String(enviar ? "true" : "false");
   j += ",\"historico\":" + String(historico ? "true" : "false");
   j += ",\"display\":"   + String(display ? "true" : "false");
+  j += ",\"ble\":"       + String(ble ? "true" : "false");
   j += ",\"intervalo\":" + String(intervalo);
   j += ",\"statusCada\":" + String(statusCada);
   // String(float, 0) prefixa um espaço; aqui vira inteiro mesmo — distância
@@ -102,6 +105,7 @@ bool CfgUnidade::aplicarJson(const String& json) {
   if ((v = valorCru(json, "enviar")).length())    enviar    = paraBool(v, enviar);
   if ((v = valorCru(json, "historico")).length()) historico = paraBool(v, historico);
   if ((v = valorCru(json, "display")).length())   display   = paraBool(v, display);
+  if ((v = valorCru(json, "ble")).length())       ble       = paraBool(v, ble);
 
   // Limites conferidos aqui porque agora não há regra de banco no caminho: um
   // intervalo de 99999 s deixaria a unidade muda por 27 horas.
@@ -115,7 +119,8 @@ bool CfgUnidade::aplicarJson(const String& json) {
     tzMin = constrain((int)v.toInt(), -720, 840);
 
   bool mudou = enviar != antes.enviar || historico != antes.historico
-            || display != antes.display || intervalo != antes.intervalo
+            || display != antes.display || ble != antes.ble
+            || intervalo != antes.intervalo
             || statusCada != antes.statusCada || distMin != antes.distMin
             || tzMin != antes.tzMin;
   if (mudou) salvar();

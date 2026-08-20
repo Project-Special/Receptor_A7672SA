@@ -14,6 +14,7 @@
 #include <ui.h>
 #include <osm.h>
 #include <cfg.h>
+#include <ble.h>
 
 // ── Pinos ────────────────────────────────────────────────────
 // UART2 do ESP32 ligada à UART principal do módulo (115200 8N1).
@@ -86,6 +87,17 @@ static const int MAPA_ZOOM = 16;
 // liga o log; '@LOG 0' desliga de novo.
 static bool logAtivo = false;
 
+// Para onde vai a resposta do comando em curso. Sem isto, um @CFG vindo pelo
+// BLE responderia na serial — e quem perguntou pelo celular ficaria sem
+// resposta.
+static bool respondendoBle = false;
+static void aoReceberBle(const String& linha);   // definida abaixo de processarComando
+
+static void resp(const String& s) {
+  if (respondendoBle) ble.enviar(s);
+  else                Serial.println(s);
+}
+
 // Com o log ligado, ecoa também todo o tráfego AT — é o que mostra onde a
 // conversa com o módulo trava.
 static const bool DEBUG_AT = true;
@@ -157,7 +169,7 @@ static void entrarPonte(bool on) {
     else    ui.forcarRedesenho();
   }
 
-  Serial.println(on ? "@BRIDGE:ON" : "@BRIDGE:OFF");
+  resp(on ? "@BRIDGE:ON" : "@BRIDGE:OFF");
 }
 
 // Reconexão pedida pelo app. O loop cuida dela; o handler da serial não pode
@@ -181,7 +193,7 @@ static void comandoWifi(const String& cmd) {
 
   if (cmd == "@WIFI?" || cmd == "@WIFI") {
     A7672Firebase::wifiSalvo(ssid, pass);
-    Serial.println("@WIFI:" + String(ssid.length() ? "SSID " : "VAZIO ") + ssid
+    resp("@WIFI:" + String(ssid.length() ? "SSID " : "VAZIO ") + ssid
                    + (WiFi.status() == WL_CONNECTED ? " CONECTADO " + WiFi.localIP().toString() : " DESCONECTADO"));
     return;
   }
@@ -189,23 +201,23 @@ static void comandoWifi(const String& cmd) {
   if (cmd == "@WIFI!") {
     A7672Firebase::wifiApagar();
     WiFi.disconnect(true);
-    Serial.println("@WIFI:APAGADO");
+    resp("@WIFI:APAGADO");
     logf("Wi-Fi: rede salva apagada pelo app.");
     return;
   }
 
   int chave = cmd.indexOf('{');
-  if (chave < 0) { Serial.println("@WIFI:ERRO formato"); return; }
+  if (chave < 0) { resp("@WIFI:ERRO formato"); return; }
   String json = cmd.substring(chave);
   ssid = A7672Firebase::jsonString(json, "ssid");
   pass = A7672Firebase::jsonString(json, "pass");
 
-  if (!ssid.length()) { Serial.println("@WIFI:ERRO ssid vazio"); return; }
-  if (!A7672Firebase::wifiSalvar(ssid, pass)) { Serial.println("@WIFI:ERRO nvs"); return; }
+  if (!ssid.length()) { resp("@WIFI:ERRO ssid vazio"); return; }
+  if (!A7672Firebase::wifiSalvar(ssid, pass)) { resp("@WIFI:ERRO nvs"); return; }
 
   // Responde já e deixa a conexão para o loop: quem mandou o comando não pode
   // ficar sem resposta enquanto o rádio associa.
-  Serial.println("@WIFI:SALVO " + ssid);
+  resp("@WIFI:SALVO " + ssid);
   logf("Wi-Fi: rede trocada pelo app para \"%s\" — conectando em segundo plano.", ssid.c_str());
   wifiReconectar = true;
 }
@@ -215,16 +227,16 @@ static void comandoWifi(const String& cmd) {
 //   @LOG 0  desliga (volta ao silêncio de fábrica)
 static void comandoLog(const String& cmd) {
   if (cmd == "@LOG?" || cmd == "@LOG") {
-    Serial.println(String("@LOG:") + (logAtivo ? "1 ligado" : "0 desligado"));
+    resp(String("@LOG:") + (logAtivo ? "1 ligado" : "0 desligado"));
     return;
   }
   int esp = cmd.indexOf(' ');
-  if (esp < 0) { Serial.println("@LOG:ERRO formato"); return; }
+  if (esp < 0) { resp("@LOG:ERRO formato"); return; }
   String v = cmd.substring(esp + 1); v.trim();
   logAtivo = (v == "1" || v.equalsIgnoreCase("on"));
   // O eco do tráfego AT acompanha o log; em ponte quem manda é a ponte.
   if (!ponteAtiva) modem.setDebug(logAtivo && DEBUG_AT ? &Serial : nullptr);
-  Serial.println(String("@LOG:") + (logAtivo ? "1 ligado" : "0 desligado"));
+  resp(String("@LOG:") + (logAtivo ? "1 ligado" : "0 desligado"));
 }
 
 // Configuração da unidade pelo cabo. Ver lib/Cfg/cfg.h para o porquê de nada
@@ -246,17 +258,29 @@ static void aplicarDisplay(bool on) {
 }
 
 static void comandoCfg(const String& cmd) {
-  if (cmd == "@CFG?" || cmd == "@CFG") { Serial.println("@CFG:" + cfg.paraJson()); return; }
+  if (cmd == "@CFG?" || cmd == "@CFG") { resp("@CFG:" + cfg.paraJson()); return; }
 
   int chave = cmd.indexOf('{');
-  if (chave < 0) { Serial.println("@CFG:ERRO formato"); return; }
+  if (chave < 0) { resp("@CFG:ERRO formato"); return; }
 
   bool displayAntes = cfg.display;
   bool mudou = cfg.aplicarJson(cmd.substring(chave));
 
   if (cfg.display != displayAntes) aplicarDisplay(cfg.display);
+
+  // Ligar/desligar o BLE em runtime. Desligar enquanto se está conectado por
+  // ele derrubaria a própria conexão no meio da resposta, então só liga aqui;
+  // desligar vale no próximo boot.
+  if (cfg.ble && !ble.ativo()) {
+    String nome = String("Rastreador ") + FB_DEVICE;
+    ble.begin(nome, aoReceberBle);
+    logf("BLE ligado como \"%s\".", nome.c_str());
+  } else if (!cfg.ble && ble.ativo() && !respondendoBle) {
+    ble.end();
+    logf("BLE desligado.");
+  }
   if (mudou) logf("Config trocada pelo app: %s", cfg.paraJson().c_str());
-  Serial.println("@CFG:" + cfg.paraJson());
+  resp("@CFG:" + cfg.paraJson());
 }
 
 // Varredura de redes, disparada pelo app. Assíncrona de propósito: o
@@ -264,12 +288,12 @@ static void comandoCfg(const String& cmd) {
 // que congelava o display na versão anterior do @WIFI.
 static void comandoScan() {
   int estado = WiFi.scanComplete();
-  if (estado == WIFI_SCAN_RUNNING) { Serial.println("@SCAN:JA_RODANDO"); return; }
+  if (estado == WIFI_SCAN_RUNNING) { resp("@SCAN:JA_RODANDO"); return; }
 
   WiFi.mode(WIFI_STA);          // sem STA ligado o scan volta vazio
   WiFi.scanDelete();
   WiFi.scanNetworks(true, true);   // async, incluindo redes ocultas
-  Serial.println("@SCAN:INICIO");
+  resp("@SCAN:INICIO");
   logf("Wi-Fi: varrendo redes...");
 }
 
@@ -282,47 +306,65 @@ static void scanPump() {
     String ssid = WiFi.SSID(i);
     ssid.replace("\\", "\\\\");
     ssid.replace("\"", "\\\"");
-    Serial.println("@SCAN:NET {\"ssid\":\"" + ssid + "\",\"rssi\":" + String(WiFi.RSSI(i))
+    resp("@SCAN:NET {\"ssid\":\"" + ssid + "\",\"rssi\":" + String(WiFi.RSSI(i))
                    + ",\"aberta\":" + (WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "true" : "false") + "}");
   }
-  Serial.println("@SCAN:FIM " + String(n));
+  resp("@SCAN:FIM " + String(n));
   logf("Wi-Fi: %d rede(s) encontrada(s).", n);
   WiFi.scanDelete();
+}
+
+// Um comando, dois caminhos: cabo USB e BLE. O conteudo e identico; muda so
+// para onde a resposta volta.
+static void processarComando(const String& cmd) {
+  // Qualquer comando significa que há alguém do outro lado ouvindo.
+  if (cmd.startsWith("@") && !logAtivo && cmd != "@LOG 0") {
+    logAtivo = true;
+    if (DEBUG_AT && !ponteAtiva) modem.setDebug(&Serial);
+    resp("@LOG:1 ligado ao receber comando do app");
+  }
+
+  if (cmd.startsWith("@LOG"))  { comandoLog(cmd);  return; }
+  if (cmd == "@BRIDGE")        { entrarPonte(true);  return; }
+  if (cmd == "@NORMAL")        { entrarPonte(false); return; }
+  if (cmd == "@PING")          { resp(ponteAtiva ? "@BRIDGE:ON" : "@BRIDGE:OFF"); return; }
+  if (cmd.startsWith("@WIFI")) { comandoWifi(cmd); return; }
+  if (cmd == "@SCAN")          { comandoScan();    return; }
+  if (cmd.startsWith("@CFG"))  { comandoCfg(cmd);  return; }
+
+  // Comando AT cru só faz sentido pelo cabo: em ponte o firmware repassa bytes
+  // entre a USB e o módulo, e o BLE não participa desse caminho.
+  if (respondendoBle) { resp("@ERRO:comandos AT so pelo cabo"); return; }
+
+  if (ponteAtiva && cmd.length()) { modem.write(cmd + "\r\n"); return; }
+
+  // Fora da ponte o firmware é dono da UART, então um comando AT vindo do PC
+  // não pode ser repassado — mas engoli-lo calado é pior: quem enviou fica
+  // esperando uma resposta que nunca vem, achando que o módulo é que não
+  // respondeu. Foi o que aconteceu ao tentar mandar SMS.
+  if (cmd.length() && !cmd.startsWith("@")) {
+    resp("@ERRO:sem ponte — mande @BRIDGE antes de comandos AT (ignorado: "
+         + cmd.substring(0, 24) + ")");
+  }
+}
+
+// Linha vinda pelo BLE. Roda na task do BLE, então marca o canal de resposta
+// antes de reaproveitar o mesmo handler do cabo.
+static void aoReceberBle(const String& linha) {
+  respondendoBle = true;
+  processarComando(linha);
+  respondendoBle = false;
 }
 
 static void pumpUsb() {
   while (Serial.available()) {
     char c = (char)Serial.read();
 
-    // As linhas de controle começam com '@' e nunca chegam ao módulo.
     if (c == '\n' || c == '\r') {
       String cmd = usbLinha;
       usbLinha = "";
       cmd.trim();
-      // Qualquer comando do app significa que há alguém do outro lado.
-      if (cmd.startsWith("@") && !logAtivo && cmd != "@LOG 0") {
-        logAtivo = true;
-        if (DEBUG_AT && !ponteAtiva) modem.setDebug(&Serial);
-        Serial.println("@LOG:1 ligado ao receber comando do app");
-      }
-
-      if (cmd.startsWith("@LOG")) { comandoLog(cmd); continue; }
-      if (cmd == "@BRIDGE")      { entrarPonte(true);  continue; }
-      if (cmd == "@NORMAL")      { entrarPonte(false); continue; }
-      if (cmd == "@PING")        { Serial.println(ponteAtiva ? "@BRIDGE:ON" : "@BRIDGE:OFF"); continue; }
-      if (cmd.startsWith("@WIFI")) { comandoWifi(cmd); continue; }
-      if (cmd == "@SCAN")          { comandoScan();    continue; }
-      if (cmd.startsWith("@CFG"))  { comandoCfg(cmd);  continue; }
-      if (ponteAtiva && cmd.length()) { modem.write(cmd + "\r\n"); continue; }
-
-      // Fora da ponte o firmware é dono da UART, então um comando AT vindo do
-      // PC não pode ser repassado — mas engoli-lo calado é pior: quem enviou
-      // fica esperando uma resposta que nunca vem, achando que o módulo é que
-      // não respondeu. Foi o que aconteceu ao tentar mandar SMS.
-      if (cmd.length() && !cmd.startsWith("@")) {
-        Serial.println("@ERRO:sem ponte — mande @BRIDGE antes de comandos AT (ignorado: "
-                       + cmd.substring(0, 24) + ")");
-      }
+      if (cmd.length()) processarComando(cmd);
       continue;
     }
 
@@ -336,6 +378,7 @@ static void pumpUsb() {
     if (usbLinha.length() < 512) usbLinha += c;
   }
 }
+
 
 // Atende um pedido de ponte no meio do setup. Sem isto o '@BRIDGE' esperava a
 // inicialização inteira — e quem abre a porta pelo Web Serial reinicia o ESP32
@@ -446,6 +489,15 @@ void setup() {
   displayAtivo = cfg.display;
   logf("Config da unidade: %s", cfg.paraJson().c_str());
   logf("Firmware: %s", __DATE__ " " __TIME__);
+
+  // BLE serve para configurar o aparelho em campo pelo celular, sem cabo e sem
+  // internet. Desligado por padrão: a pilha ocupa RAM e o rádio consome, e a
+  // maioria das unidades vai ser configurada na bancada.
+  if (cfg.ble) {
+    String nome = String("Rastreador ") + FB_DEVICE;
+    if (ble.begin(nome, aoReceberBle)) logf("BLE ligado como \"%s\".", nome.c_str());
+    else                               logf("BLE falhou ao iniciar.");
+  }
 
   if (displayAtivo) {
     ui.begin();
