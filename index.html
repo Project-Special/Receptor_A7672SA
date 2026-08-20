@@ -2745,8 +2745,16 @@ function handleKey(e) {
 // LOG
 // ============================================================
 // Tráfego do poll de GNSS: comando, eco, resposta e as sentenças NMEA.
+// O terminal imprime a linha como veio, e ligado ao ESP32 fora do modo ponte
+// ela vem com o prefixo de eco do firmware ('<< ' para resposta do módulo,
+// '>> ' para o que ele enviou). Sem descontar isso, o '^' não casava e
+// "Ocultar GNSS" não escondia nada.
+function semEcoEsp32(msg) {
+  return String(msg).trim().replace(/^(?:<<|>>)\s*/, '');
+}
+
 function isGnssTraffic(msg) {
-  const m = String(msg).trim();
+  const m = semEcoEsp32(msg);
   return /^\$[A-Z]{2}[A-Z]{3}/.test(m)          // NMEA
       || /^AT\+CGNSSINFO/i.test(m)              // TX e eco
       || /^\+CGNSSINFO:/.test(m);
@@ -2759,7 +2767,7 @@ function log(dir, msg, cls) {
   // normalmente, porque parseResponse() roda antes desta função.
   if (document.getElementById('hideGnssLog')?.checked) {
     if (isGnssTraffic(msg)) { gnssOkPending = true; return; }
-    if (gnssOkPending && dir === 'rx' && String(msg).trim() === 'OK') { gnssOkPending = false; return; }
+    if (gnssOkPending && dir === 'rx' && semEcoEsp32(msg) === 'OK') { gnssOkPending = false; return; }
     gnssOkPending = false;
   }
 
