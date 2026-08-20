@@ -529,6 +529,25 @@
     .pill.on  { color: var(--green); border-color: #3fb95055; background: #16281a; }
     .pill.off { color: var(--text-dim); }
     .pill.err { color: var(--red); border-color: #f8514955; background: #2b1517; }
+    /* Aviso de "sem serial", no topo das abas que dependem do módulo. Só
+       aparece desconectado — conectado, não ocupa espaço nenhum. */
+    .aviso-serial { display: none; }
+    body.sem-serial .panel .aviso-serial {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      border: 1px solid #6b551a; background: #241f10; border-radius: 10px;
+      padding: 12px 14px; font-size: 13px; color: #e3c07b; line-height: 1.5;
+    }
+    .aviso-serial .ico { font-size: 20px; }
+    .aviso-serial span:not(.ico) { flex: 1; min-width: 220px; }
+    .aviso-serial b { color: #f5deb0; }
+    .aviso-serial .action-btn { flex: 0 0 auto; }
+
+    /* Botão desabilitado precisa parecer desabilitado: sem isto o usuário
+       clica achando que funciona. */
+    .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .action-btn:disabled:hover { background: var(--accent); }
+    .action-btn.secondary:disabled:hover { background: transparent; }
+
     /* ── Aba ESP32 ─────────────────────────────────────────── */
     .esp-head { display: flex; align-items: center; justify-content: space-between;
                 gap: 12px; flex-wrap: wrap; }
@@ -2708,7 +2727,7 @@ function requireConnection(what) {
   const now = Date.now();
   if (now - lastNoConnWarn > 1500) {
     lastNoConnWarn = now;
-    log('sys', `Desconectado — ${what} não enviado. Conecte-se ao módulo primeiro.`, 'err');
+    log('sys', `Desconectado — ${what} não enviado. Escolha a Interface no topo e clique em Conectar.`, 'err');
   }
   return false;
 }
@@ -2890,6 +2909,36 @@ function setStatus(state) {
 }
 
 // Trava os botões de comando AT enquanto não há transporte ativo
+// Abas cujos controles só fazem sentido com o módulo na linha. Ficam de fora:
+// 'map' e 'firebase' (leem do banco), 'esp32' (status e logs vêm do banco) e
+// 'info'/'terminal' (informativos).
+const ABAS_COM_SERIAL = ['gnss', 'rede', 'sms', 'voz', 'http', 'mqtt', 'tcp', 'fs', 'hw', 'bt'];
+
+// Insere o aviso uma única vez no topo de cada aba que depende da serial.
+// Antes, clicar num botão desconectado só produzia uma linha vermelha no
+// terminal, que fica em outra aba — o usuário clicava várias vezes sem
+// entender, e o terminal enchia de "não enviado".
+function montarAvisosSerial() {
+  for (const nome of ABAS_COM_SERIAL) {
+    const pane = document.querySelector(`#panel-${nome} .pane`);
+    if (!pane || pane.querySelector('.aviso-serial')) continue;
+    const el = document.createElement('div');
+    el.className = 'aviso-serial';
+    el.innerHTML = '<span class="ico">🔌</span>'
+      + '<span><b>Sem conexão com o módulo.</b> Os comandos desta aba precisam da '
+      + 'serial — conecte em <b>Interface</b>, no topo. Com o ESP32 no meio, use '
+      + '<b>"ESP32 (ponte USB)"</b>.</span>'
+      + '<button class="action-btn" onclick="focarConexao()">Conectar</button>';
+    pane.insertBefore(el, pane.firstChild);
+  }
+}
+
+function focarConexao() {
+  document.body.classList.remove('connbar-off');   // a barra some sozinha no celular
+  document.getElementById('connMode')?.focus();
+  document.getElementById('connectBtn')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
 function setCommandsEnabled(on) {
   document.querySelectorAll('.cmd-btn').forEach(b => { b.disabled = !on; });
   const inp = document.getElementById('cmdInput');
@@ -2901,6 +2950,16 @@ function setCommandsEnabled(on) {
   }
   const sendBtn = document.querySelector('.send-btn');
   if (sendBtn) sendBtn.disabled = !on;
+
+  // Os botões dos painéis também: sem isto o clique chegava ao send() e só
+  // então falhava, uma linha de erro por clique.
+  document.body.classList.toggle('sem-serial', !on);
+  montarAvisosSerial();
+  for (const nome of ABAS_COM_SERIAL) {
+    document.querySelectorAll(`#panel-${nome} .pane .action-btn`).forEach(b => {
+      if (!b.closest('.aviso-serial')) b.disabled = !on;
+    });
+  }
 }
 
 function onConnModeChange() {
@@ -6144,6 +6203,10 @@ window.addEventListener('load', () => {
   document.querySelectorAll('.cmd-btn').forEach(btn => {
     btn.addEventListener('click', () => { if (window.innerWidth <= 768) closeSidebar(); });
   });
+
+  // O app abre desconectado: monta os avisos e desabilita os botões que
+  // dependem da serial já na primeira tela.
+  setCommandsEnabled(false);
 
   firebaseLoadCfg();
 
