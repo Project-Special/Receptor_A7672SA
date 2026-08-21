@@ -546,6 +546,17 @@
     .pill.on  { color: var(--green); border-color: #3fb95055; background: #16281a; }
     .pill.off { color: var(--text-dim); }
     .pill.err { color: var(--red); border-color: #f8514955; background: #2b1517; }
+    /* Diagnóstico do GNSS: a faixa colorida à esquerda dá o estado de relance,
+       e o texto diz o que está faltando. */
+    .gnss-diag { border: 1px solid var(--border); border-left: 4px solid var(--text-dim);
+                 border-radius: 10px; padding: 12px 16px;
+                 background: rgba(255,255,255,0.02); }
+    .gnss-diag.ok   { border-left-color: var(--green, #3fb950); background: rgba(63,185,80,0.06); }
+    .gnss-diag.warn { border-left-color: #d29922;              background: rgba(210,153,34,0.07); }
+    .gnss-diag.err  { border-left-color: var(--red, #f85149);  background: rgba(248,81,73,0.07); }
+    .gnss-diag-t { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+    .gnss-diag-d { font-size: 12px; color: var(--text-dim); line-height: 1.55; }
+
     /* Aviso de "sem serial", no topo das abas que dependem do módulo. Só
        aparece desconectado — conectado, não ocupa espaço nenhum. */
     .aviso-serial { display: none; }
@@ -1390,9 +1401,17 @@
                   <div class="info-card"><div class="card-label">Hora local</div><div class="card-value" id="g-time-local" style="font-size:13px;">--</div><div class="card-unit" id="g-tz">fuso do navegador</div></div>
                   <div class="info-card"><div class="card-label">Total em uso</div><div class="card-value" id="g-sv-total">--</div><div class="card-unit">satélites</div></div>
                   <div class="info-card"><div class="card-label">C/N0 médio (NMEA)</div><div class="card-value" id="g-cn0">--</div><div class="card-unit">dBHz · via GSV</div></div>
+                  <div class="info-card"><div class="card-label">Recebidos</div><div class="card-value" id="g-vis">--</div><div class="card-unit">com sinal, via GSV</div></div>
+                  <div class="info-card"><div class="card-label">Posicionados</div><div class="card-value" id="g-orbita" style="font-size:16px;">--</div><div class="card-unit">com efemérides</div></div>
+                  <div class="info-card"><div class="card-label">Melhor sinal</div><div class="card-value" id="g-melhor" style="font-size:16px;">--</div><div class="card-unit">≥35 é bom</div></div>
                 </div>
               </div>
             </div>
+          </div>
+
+          <div id="g-diag" class="gnss-diag">
+            <div class="gnss-diag-t" id="g-diag-t">Aguardando dados do GNSS...</div>
+            <div class="gnss-diag-d" id="g-diag-d">Ligue o receptor e o stream NMEA para ver o diagnóstico.</div>
           </div>
 
           <div id="gnss-view-raw" style="display:none;">
@@ -4105,7 +4124,17 @@ function parseNmea(line) {
       const prn = (f[i - 3] || '').trim();
       if (!prn) continue;
       const snr = parseInt(f[i], 10);
-      nmeaSats[talker + prn] = { snr: isNaN(snr) ? 0 : snr, t: Date.now() };
+      const elev = (f[i - 2] || '').trim();
+      const azim = (f[i - 1] || '').trim();
+      // Elevação e azimute preenchidos significam que o receptor já sabe ONDE
+      // o satélite está — ou seja, já baixou as efemérides. Com SNR mas sem
+      // elevação, ele ouve o satélite e não consegue triangular: é a fase de
+      // partida a frio, e a diferença entre "sem sinal" e "quase lá".
+      nmeaSats[talker + prn] = {
+        snr: isNaN(snr) ? 0 : snr,
+        temOrbita: !!(elev && azim),
+        t: Date.now(),
+      };
       if (!isNaN(snr) && snr > 0) nmeaSnrAcc.push(snr);
     }
     if (nmeaSnrAcc.length > 24) nmeaSnrAcc = nmeaSnrAcc.slice(-24);
@@ -4115,10 +4144,85 @@ function parseNmea(line) {
     }
   }
 
-  if (Date.now() - nmeaLastRender > 900) { nmeaLastRender = Date.now(); renderNmeaFix(); }
+  if (Date.now() - nmeaLastRender > 900) { nmeaLastRender = Date.now(); renderNmeaFix(); gnssDiagnostico(); }
 }
 
 // Alimenta os mesmos cards que o +CGNSSINFO preenche, a partir do NMEA.
+
+// ── Diagnóstico do GNSS ───────────────────────────────────────
+// Os números crus (DOP, contagem de satélites, C/N0) dizem o estado mas não o
+// que fazer com ele. Isto traduz: por que não há fix, o que falta e quanto
+// tempo já se passou. A leitura que mais engana é ter satélites com SNR e
+// nenhum fix — parece defeito e é só partida a frio sem efemérides.
+let gnssBuscaDesde = 0;
+
+function gnssDiagnostico() {
+  const s = nmeaState;
+  const agora = Date.now();
+
+  // Satélites ouvidos nos últimos 10 s, para não contar leitura velha.
+  const vistos = Object.values(nmeaSats).filter(v => agora - v.t < 10000);
+  const comSinal = vistos.filter(v => v.snr > 0);
+  const comOrbita = comSinal.filter(v => v.temOrbita);
+  const emUso = s.sv.gps + s.sv.glo + s.sv.gal + s.sv.bds;
+  const melhor = comSinal.length ? Math.max(...comSinal.map(v => v.snr)) : 0;
+  const fortes = comSinal.filter(v => v.snr >= 35).length;
+
+  setText('g-vis', comSinal.length ? String(comSinal.length) : '--');
+  setText('g-orbita', comSinal.length ? `${comOrbita.length} de ${comSinal.length}` : '--');
+  setText('g-melhor', melhor ? `${melhor} dBHz` : '--');
+
+  const temFix = s.quality > 0 && s.lat !== null;
+  if (!temFix && !gnssBuscaDesde) gnssBuscaDesde = agora;
+  if (temFix) gnssBuscaDesde = 0;
+  const seg = gnssBuscaDesde ? Math.floor((agora - gnssBuscaDesde) / 1000) : 0;
+
+  let titulo, detalhe, cor;
+
+  if (temFix) {
+    const q = parseFloat(s.hdop) || 99;
+    titulo = `Fix ${s.fixMode === 3 ? '3D' : '2D'} — ${emUso} satélites em uso`;
+    detalhe = q <= 1 ? 'Precisão excelente. Posição confiável para rastreamento.'
+            : q <= 2 ? 'Precisão boa, dentro do esperado a céu aberto.'
+            : q <= 5 ? 'Precisão razoável — a posição pode oscilar alguns metros.'
+                     : 'Precisão ruim: poucos satélites ou geometria desfavorável. Vale abrir o horizonte da antena.';
+    cor = q <= 2 ? 'ok' : q <= 5 ? 'warn' : 'err';
+  } else if (!comSinal.length) {
+    titulo = 'Nenhum satélite recebido';
+    detalhe = 'Sem sinal nenhum. Confira se o receptor está ligado (AT+CGNSSPWR=1), '
+            + 'se a antena está conectada e se ela tem vista para o céu — dentro de '
+            + 'prédio o GNSS não pega.';
+    cor = 'err';
+  } else if (!comOrbita.length) {
+    titulo = `Ouvindo ${comSinal.length} satélites, baixando efemérides`;
+    detalhe = `Há sinal (melhor: ${melhor} dBHz), mas o receptor ainda não sabe a posição `
+            + 'dos satélites no céu — precisa baixar as efemérides pelo próprio sinal, o '
+            + 'que leva 30 a 90 s de recepção contínua. É a partida a frio normal, não é falha. '
+            + 'AT+CAGPS baixa essa assistência pela rede e reduz para poucos segundos.';
+    cor = 'warn';
+  } else if (comOrbita.length < 4) {
+    titulo = `${comOrbita.length} de 4 satélites prontos`;
+    detalhe = `${comSinal.length} satélites ouvidos, ${comOrbita.length} já posicionados. `
+            + 'São necessários 4 para calcular posição 3D. Continuando com o céu aberto, '
+            + 'os demais entram nos próximos segundos.';
+    cor = 'warn';
+  } else {
+    titulo = `${comOrbita.length} satélites prontos, calculando`;
+    detalhe = fortes >= 4
+      ? 'Sinal suficiente. O fix deve sair em instantes.'
+      : `Só ${fortes} satélites acima de 35 dBHz — sinal fraco atrasa o cálculo. `
+        + 'Melhor sinal costuma vir a céu aberto, longe de paredes e janelas.';
+    cor = fortes >= 4 ? 'ok' : 'warn';
+  }
+
+  if (seg > 20) detalhe += ` (buscando há ${seg < 90 ? seg + ' s' : Math.floor(seg/60) + ' min'})`;
+
+  setText('g-diag-t', titulo);
+  setText('g-diag-d', detalhe);
+  const el = document.getElementById('g-diag');
+  if (el) el.className = 'gnss-diag ' + cor;
+}
+
 function renderNmeaFix() {
   const s = nmeaState;
   if (s.lat === null || s.lon === null || !s.quality) return;
