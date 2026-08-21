@@ -1820,6 +1820,11 @@
               <label>Intervalo (s)</label>
               <input id="fbInterval" type="number" min="5" value="30" onchange="firebaseIntervalChanged()" />
             </div>
+            <div class="form-group f-curto">
+              <label>Dist. mínima (m)</label>
+              <input id="fbMinDist" type="number" min="0" max="10000" value="0"
+                     title="0 envia todo ciclo. Parado, o GPS oscila 7 a 17 m e cada oscilação viraria um ponto novo; 15 a 25 m corta isso. Mesmo critério do firmware." />
+            </div>
             <div class="form-group f-longo">
               <label>Histórico</label>
               <select id="fbTrack">
@@ -1832,7 +1837,7 @@
           <div class="btn-row">
             <button class="action-btn" id="fbToggleBtn" onclick="firebaseToggle()">▶️ Iniciar envio</button>
             <button class="action-btn secondary" onclick="firebaseTestConnection()">🔍 Testar conexão</button>
-            <button class="action-btn secondary" onclick="firebaseSendNow()">📤 Enviar agora</button>
+            <button class="action-btn secondary" onclick="firebaseSendNow(true)">📤 Enviar agora</button>
             <button class="action-btn secondary" onclick="firebaseOpenConsole()">🌐 Abrir no console</button>
             <button class="action-btn secondary" onclick="firebaseForget()">🗑️ Esquecer credenciais</button>
           </div>
@@ -5058,6 +5063,7 @@ function firebaseCfg() {
     device:   (document.getElementById('fbDevice').value || 'rastreador01').trim(),
     interval: Math.max(5, parseInt(document.getElementById('fbInterval').value, 10) || 30),
     track:    document.getElementById('fbTrack').value === '1',
+    minDist:  Math.min(10000, Math.max(0, parseInt(document.getElementById('fbMinDist').value, 10) || 0)),
   };
 }
 
@@ -5078,6 +5084,7 @@ function firebaseLoadCfg() {
   if (s.device)   document.getElementById('fbDevice').value = s.device;
   if (s.interval) document.getElementById('fbInterval').value = s.interval;
   if (s.track !== undefined) document.getElementById('fbTrack').value = s.track ? '1' : '0';
+  if (s.minDist !== undefined) document.getElementById('fbMinDist').value = s.minDist;
   if (s.refreshToken) {
     fbAuth.refreshToken = s.refreshToken;
     setText('fb-auth', 'Token salvo');
@@ -5192,11 +5199,28 @@ function fbDayKey(iso) {
   return (iso && iso.length >= 10) ? iso.slice(0, 10) : 'sem-data';
 }
 
-async function firebaseSendNow() {
+// Último ponto que de fato subiu. A comparação é contra ele, não contra o fix
+// anterior: senão uma deriva lenta passaria ponto a ponto, cada um abaixo do
+// limite mas somando centenas de metros.
+let fbUltimoEnviado = null;
+
+async function firebaseSendNow(forcado) {
   const c = firebaseCfg();
   if (!c.host || !c.key) { alert('Preencha o host do banco e a Web API Key.'); return; }
   if (!lastFix) { fbLog('Sem fix válido — nada enviado.', 'warn'); return; }
   if (fbBusy) return;
+
+  // Mesmo critério do firmware: parado, o GPS oscila alguns metros e cada
+  // oscilação viraria um ponto no banco. "Enviar agora" ignora o filtro, que é
+  // o sentido de ser um comando manual.
+  if (!forcado && c.minDist > 0 && fbUltimoEnviado) {
+    const d = haversineKm([fbUltimoEnviado.lat, fbUltimoEnviado.lon],
+                          [lastFix.lat, lastFix.lon]) * 1000;
+    if (d < c.minDist) {
+      fbLog(`Parado (${d.toFixed(1)} m < ${c.minDist} m) — nada enviado.`, 'warn');
+      return;
+    }
+  }
 
   fbBusy = true;
   const fix = lastFix;
@@ -5210,6 +5234,9 @@ async function firebaseSendNow() {
 
     fbStats.sent++;
     fbStats.lastSentAt = Date.now();
+    // Só depois de subir: uma falha de rede não pode "consumir" o
+    // deslocamento e fazer o ponto seguinte ser filtrado à toa.
+    fbUltimoEnviado = { lat: fix.lat, lon: fix.lon };
     setText('fb-sent', fbStats.sent);
     setText('fb-last', new Date().toLocaleTimeString('pt-BR'));
     setText('fb-day', c.track ? day : '(desligado)');
